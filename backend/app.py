@@ -7,6 +7,7 @@ from creator_api import router as creator_router
 from monetization_api import router as monetization_router
 from payouts_api import router as payouts_router
 from admin_payouts_api import router as admin_payouts_router
+from admin_moderation_api import router as admin_moderation_router
 from security import install_security
 from payout_state import normalize_state, can_transition
 
@@ -35,6 +36,7 @@ app.include_router(creator_router)
 app.include_router(monetization_router)
 app.include_router(payouts_router)
 app.include_router(admin_payouts_router)
+app.include_router(admin_moderation_router)
 install_security(app)
 
 # Internal lifecycle guard used by future admin/provider endpoints.
