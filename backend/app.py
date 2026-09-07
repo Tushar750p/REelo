@@ -6,6 +6,7 @@ from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
 from payouts_api import router as payouts_router
+from admin_payouts_api import router as admin_payouts_router
 from security import install_security
 from payout_state import normalize_state, can_transition
 
@@ -33,10 +34,10 @@ app.include_router(moderation_router)
 app.include_router(creator_router)
 app.include_router(monetization_router)
 app.include_router(payouts_router)
+app.include_router(admin_payouts_router)
 install_security(app)
 
 # Internal lifecycle guard used by future admin/provider endpoints.
-# It intentionally does not expose a public route or move money by itself.
 def validate_payout_transition(current: str, target: str) -> str:
     current_state = normalize_state(current)
     target_state = normalize_state(target)
