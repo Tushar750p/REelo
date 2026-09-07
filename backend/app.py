@@ -11,6 +11,7 @@ from admin_moderation_api import router as admin_moderation_router
 from community_actions_api import router as community_actions_router, blocked_ids
 from trending_api import router as trending_router
 from topics_api import router as topics_router
+from smart_search_api import router as smart_search_router
 from security import install_security
 from payout_state import normalize_state, can_transition
 
@@ -43,6 +44,7 @@ def personalized_feed(limit: int = 20, following: bool = False, mode: str | None
 app.include_router(recommendation_router)
 app.include_router(trending_router)
 app.include_router(topics_router)
+app.include_router(smart_search_router)
 app.include_router(moderation_router)
 app.include_router(creator_router)
 app.include_router(monetization_router)
