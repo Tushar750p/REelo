@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 import hashlib, hmac, os, secrets, sqlite3
 ROOT=Path(__file__).parent; MEDIA=ROOT/"media"; MEDIA.mkdir(exist_ok=True); DB=ROOT/"reelo.db"; SECRET=os.getenv("REELO_SECRET","change-this-in-production").encode(); MAX_VIDEO_BYTES=100*1024*1024
-app=FastAPI(title="REelo API",version="0.6.0")
+app=FastAPI(title="REelo API",version="0.6.1")
 app.add_middleware(CORSMiddleware,allow_origins=os.getenv("CORS_ORIGINS","*").split(","),allow_credentials=True,allow_methods=["*"],allow_headers=["*"]); app.mount("/media",StaticFiles(directory=MEDIA),name="media")
 def db(): conn=sqlite3.connect(DB); conn.row_factory=sqlite3.Row; return conn
 def init_db():
@@ -73,7 +73,9 @@ def feed_rows(c,uid,limit,following_only=False):
   return c.execute("SELECT v.*,u.username,u.display_name,CASE WHEN EXISTS(SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=?) THEN 1 ELSE 0 END liked FROM videos v JOIN users u ON u.id=v.user_id JOIN follows f ON f.following_id=v.user_id AND f.follower_id=? WHERE v.status='ready' ORDER BY v.created_at DESC LIMIT ?",(uid,uid,limit)).fetchall()
  return c.execute("SELECT v.*,u.username,u.display_name,CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=?) THEN 1 ELSE 0 END liked FROM videos v JOIN users u ON u.id=v.user_id WHERE v.status='ready' ORDER BY v.created_at DESC LIMIT ?",(uid,uid,limit)).fetchall()
 @app.get("/api/feed")
-def feed(limit:int=20,following:bool=False,authorization:str|None=Header(default=None)):
+def feed(limit:int=20,following:bool=False,mode:str|None=None,authorization:str|None=Header(default=None)):
+ if mode is not None:
+  following=mode.strip().lower()=="following"
  uid=current_user(authorization);limit=max(1,min(limit,50))
  with db() as c:r=feed_rows(c,uid,limit,following)
  return {"items":[dict(x) for x in r],"algorithm":"following-v1" if following else "hybrid-v1","following":following}
