@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 import hashlib, hmac, os, secrets, sqlite3
 ROOT=Path(__file__).parent; MEDIA=ROOT/"media"; MEDIA.mkdir(exist_ok=True); DB=ROOT/"reelo.db"; SECRET=os.getenv("REELO_SECRET","change-this-in-production").encode(); MAX_VIDEO_BYTES=100*1024*1024
-app=FastAPI(title="REelo API",version="0.5.0")
+app=FastAPI(title="REelo API",version="0.6.0")
 app.add_middleware(CORSMiddleware,allow_origins=os.getenv("CORS_ORIGINS","*").split(","),allow_credentials=True,allow_methods=["*"],allow_headers=["*"]); app.mount("/media",StaticFiles(directory=MEDIA),name="media")
 def db(): conn=sqlite3.connect(DB); conn.row_factory=sqlite3.Row; return conn
 def init_db():
@@ -67,11 +67,16 @@ def update_me(data:ProfileUpdate,authorization:str|None=Header(default=None)):
   if not display or len(display)>80 or len(bio)>160:raise HTTPException(400,"Invalid profile data")
   c.execute("UPDATE users SET display_name=?,bio=? WHERE id=?",(display,bio,uid));r=c.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
  return {"user":public_user(r)}
+def feed_rows(c,uid,limit,following_only=False):
+ if following_only:
+  if not uid:return []
+  return c.execute("SELECT v.*,u.username,u.display_name,CASE WHEN EXISTS(SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=?) THEN 1 ELSE 0 END liked FROM videos v JOIN users u ON u.id=v.user_id JOIN follows f ON f.following_id=v.user_id AND f.follower_id=? WHERE v.status='ready' ORDER BY v.created_at DESC LIMIT ?",(uid,uid,limit)).fetchall()
+ return c.execute("SELECT v.*,u.username,u.display_name,CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=?) THEN 1 ELSE 0 END liked FROM videos v JOIN users u ON u.id=v.user_id WHERE v.status='ready' ORDER BY v.created_at DESC LIMIT ?",(uid,uid,limit)).fetchall()
 @app.get("/api/feed")
-def feed(limit:int=20,authorization:str|None=Header(default=None)):
+def feed(limit:int=20,following:bool=False,authorization:str|None=Header(default=None)):
  uid=current_user(authorization);limit=max(1,min(limit,50))
- with db() as c:r=c.execute("SELECT v.*,u.username,u.display_name,CASE WHEN ? IS NOT NULL AND EXISTS(SELECT 1 FROM likes l WHERE l.video_id=v.id AND l.user_id=?) THEN 1 ELSE 0 END liked FROM videos v JOIN users u ON u.id=v.user_id WHERE v.status='ready' ORDER BY v.created_at DESC LIMIT ?",(uid,uid,limit)).fetchall()
- return {"items":[dict(x) for x in r],"algorithm":"hybrid-v1"}
+ with db() as c:r=feed_rows(c,uid,limit,following)
+ return {"items":[dict(x) for x in r],"algorithm":"following-v1" if following else "hybrid-v1","following":following}
 @app.get("/api/search")
 def search(q:str):
  with db() as c:r=c.execute("SELECT v.*,u.username,u.display_name FROM videos v JOIN users u ON u.id=v.user_id WHERE v.status='ready' AND (v.caption LIKE ? OR u.username LIKE ?) ORDER BY v.created_at DESC LIMIT 50",(f"%{q.strip()}%",f"%{q.strip()}%")).fetchall()
@@ -89,8 +94,7 @@ async def upload_video(file:UploadFile=File(...),caption:str=Form(""),authorizat
     total+=len(chunk)
     if total>MAX_VIDEO_BYTES:raise HTTPException(413,"Video is too large. Maximum size is 100 MB.")
     out.write(chunk)
- except Exception:
-  dest.unlink(missing_ok=True);raise
+ except Exception:dest.unlink(missing_ok=True);raise
  if not total:dest.unlink(missing_ok=True);raise HTTPException(400,"Empty video file")
  vid=uuid4().hex
  with db() as c:c.execute("INSERT INTO videos(id,user_id,filename,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?)",(vid,uid,name,caption.strip()[:2200],total,mime,"ready"))
@@ -111,8 +115,7 @@ def list_comments(video_id:str,limit:int=50,offset:int=0):
  limit=max(1,min(limit,100));offset=max(0,offset)
  with db() as c:
   if not c.execute("SELECT 1 FROM videos WHERE id=?",(video_id,)).fetchone():raise HTTPException(404,"Video not found")
-  r=c.execute("SELECT c.id,c.body,c.created_at,u.id user_id,u.username,u.display_name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.video_id=? ORDER BY c.created_at DESC LIMIT ? OFFSET ?",(video_id,limit,offset)).fetchall()
-  total=c.execute("SELECT COUNT(*) FROM comments WHERE video_id=?",(video_id,)).fetchone()[0]
+  r=c.execute("SELECT c.id,c.body,c.created_at,u.id user_id,u.username,u.display_name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.video_id=? ORDER BY c.created_at DESC LIMIT ? OFFSET ?",(video_id,limit,offset)).fetchall();total=c.execute("SELECT COUNT(*) FROM comments WHERE video_id=?",(video_id,)).fetchone()[0]
  return {"items":[dict(x) for x in r],"total":total,"limit":limit,"offset":offset}
 @app.post("/api/videos/{video_id}/comments")
 def comment(video_id:str,data:CommentIn,authorization:str|None=Header(default=None)):
@@ -122,8 +125,7 @@ def comment(video_id:str,data:CommentIn,authorization:str|None=Header(default=No
  if not body or len(body)>500:raise HTTPException(400,"Comment must be 1-500 characters")
  with db() as c:
   if not c.execute("SELECT 1 FROM videos WHERE id=?",(video_id,)).fetchone():raise HTTPException(404,"Video not found")
-  cid=uuid4().hex;c.execute("INSERT INTO comments(id,user_id,video_id,body) VALUES(?,?,?,?)",(cid,uid,video_id,body));c.execute("UPDATE videos SET comments=comments+1 WHERE id=?",(video_id,))
-  r=c.execute("SELECT c.id,c.body,c.created_at,u.username,u.display_name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.id=?",(cid,)).fetchone()
+  cid=uuid4().hex;c.execute("INSERT INTO comments(id,user_id,video_id,body) VALUES(?,?,?,?)",(cid,uid,video_id,body));c.execute("UPDATE videos SET comments=comments+1 WHERE id=?",(video_id,));r=c.execute("SELECT c.id,c.body,c.created_at,u.username,u.display_name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.id=?",(cid,)).fetchone()
  return dict(r)
 @app.post("/api/users/{user_id}/follow")
 def follow(user_id:str,authorization:str|None=Header(default=None)):
