@@ -5,6 +5,7 @@ from recommendation_api import router as recommendation_router, recommendations
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
+from payouts_api import router as payouts_router
 from security import install_security
 
 # Replace the default chronological For You handler without modifying the large legacy file.
@@ -30,4 +31,5 @@ app.include_router(recommendation_router)
 app.include_router(moderation_router)
 app.include_router(creator_router)
 app.include_router(monetization_router)
+app.include_router(payouts_router)
 install_security(app)
