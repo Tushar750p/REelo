@@ -1,6 +1,6 @@
 from fastapi import Header, HTTPException
 
-from main import app, feed as legacy_feed
+from main import app, feed as legacy_feed, db, current_user
 from recommendation_api import router as recommendation_router, recommendations
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
@@ -8,6 +8,7 @@ from monetization_api import router as monetization_router
 from payouts_api import router as payouts_router
 from admin_payouts_api import router as admin_payouts_router
 from admin_moderation_api import router as admin_moderation_router
+from community_actions_api import router as community_actions_router, blocked_ids
 from security import install_security
 from payout_state import normalize_state, can_transition
 
@@ -16,6 +17,19 @@ app.router.routes[:] = [
     route for route in app.router.routes
     if not (getattr(route, "path", None) == "/api/feed" and "GET" in getattr(route, "methods", set()))
 ]
+
+
+def filter_blocked(result, authorization):
+    uid = current_user(authorization)
+    if not uid or not isinstance(result, dict) or not isinstance(result.get("items"), list):
+        return result
+    with db() as c:
+        blocked = blocked_ids(c, uid)
+    if not blocked:
+        return result
+    result["items"] = [item for item in result["items"] if str(item.get("user_id", "")) not in blocked]
+    return result
+
 
 @app.get("/api/feed")
 def personalized_feed(
@@ -27,8 +41,10 @@ def personalized_feed(
     if mode is not None:
         following = mode.strip().lower() == "following"
     if following:
-        return legacy_feed(limit=limit, following=True, mode="following", authorization=authorization)
-    return recommendations(limit=limit, authorization=authorization)
+        result = legacy_feed(limit=limit, following=True, mode="following", authorization=authorization)
+    else:
+        result = recommendations(limit=limit, authorization=authorization)
+    return filter_blocked(result, authorization)
 
 app.include_router(recommendation_router)
 app.include_router(moderation_router)
@@ -37,6 +53,7 @@ app.include_router(monetization_router)
 app.include_router(payouts_router)
 app.include_router(admin_payouts_router)
 app.include_router(admin_moderation_router)
+app.include_router(community_actions_router)
 install_security(app)
 
 # Internal lifecycle guard used by future admin/provider endpoints.
