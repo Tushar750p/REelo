@@ -23,15 +23,15 @@
     `; document.head.appendChild(style);
   }
 
-  function render(data, query) {
+  function render(data) {
     const items=data.items||[], suggestions=data.suggestions||[], topics=data.topics||[], trends=data.trending_topics||[];
     let html='';
     if (suggestions.length) html += `<div class="smart-suggest"><div class="smart-label">Suggestions</div>${suggestions.map(s=>`<button class="smart-chip" data-suggestion="${esc(s)}">${esc(s)}</button>`).join('')}</div>`;
     if (topics.length || trends.length) html += `<div class="smart-suggest"><div class="smart-label">Explore topics</div><div class="smart-topics">${[...new Set([...topics,...trends])].slice(0,8).map(t=>`<button class="smart-topic" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div></div>`;
     if (items.length) html += `<div class="section-title">Smart results</div>` + items.map((v,i)=>`<article class="video smart-video" data-video-id="${esc(v.id)}"><video class="thumb" src="${esc(videoUrl(v))}" muted playsinline preload="metadata"></video><div class="meta"><div class="name">@${esc(v.username||'creator')}</div><div class="caption">${esc(v.caption||'No caption')}</div><div class="stats">${fmt(v.likes)} likes · ${fmt(v.comments)} comments · ${fmt(v.views)} views</div><div class="smart-badge">${i<3?'Top match · ':''}${data.personalized?'Personalized ranking':''}</div></div></article>`).join('');
     content.innerHTML=html || '<div class="empty">No smart results found. Try a creator, topic, or hashtag.</div>';
-    content.querySelectorAll('[data-suggestion]').forEach(b=>b.onclick=()=>{input.value=b.dataset.suggestion; run(input.value);});
-    content.querySelectorAll('[data-topic]').forEach(b=>b.onclick=()=>{input.value=b.dataset.topic; run(input.value);});
+    content.querySelectorAll('[data-suggestion]').forEach(b=>b.onclick=()=>{input.value=b.dataset.suggestion; lastQuery=''; run(input.value);});
+    content.querySelectorAll('[data-topic]').forEach(b=>b.onclick=()=>{input.value=b.dataset.topic; lastQuery=''; run(input.value);});
   }
 
   async function run(value) {
@@ -42,9 +42,15 @@
     try {
       const r=await fetch(API+'/api/smart-search?q='+encodeURIComponent(query)+'&limit=30');
       if(!r.ok) throw new Error('search');
-      render(await r.json(), query);
+      render(await r.json());
     } catch(e) { content.innerHTML='<div class="empty">Smart search is temporarily unavailable.</div>'; }
   }
 
-  input.addEventListener('input',()=>{clearTimeout(timer);lastQuery='';timer=setTimeout(()=>run(input.value),220);});
+  // Capture before the legacy search handler so Smart Search is the single renderer.
+  input.addEventListener('input', event => {
+    event.stopImmediatePropagation();
+    clearTimeout(timer);
+    lastQuery='';
+    timer=setTimeout(()=>run(input.value),220);
+  }, true);
 })();
