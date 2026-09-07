@@ -1,7 +1,7 @@
 """Dependency-free personalized ranking for REelo's For You feed.
 
-Combines engagement quality, watch behavior, creator affinity, freshness,
-exploration, and session-level creator diversity.
+Combines engagement quality, watch behavior, creator affinity, topic affinity,
+freshness, exploration, and session-level creator diversity.
 """
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ def _age_hours(created_at: str | None) -> float:
 def score_video(video: dict, *, watch_score: float = 0.0,
                 liked: bool = False, followed_creator: bool = False,
                 seen: bool = False, creator_affinity: float = 0.0,
+                topic_affinity: float = 0.0,
                 recent_creator: bool = False) -> float:
     """Return a deterministic ranking score for one candidate."""
     engagement = (
@@ -38,11 +39,12 @@ def score_video(video: dict, *, watch_score: float = 0.0,
     )
     watch = max(-5.0, min(10.0, float(watch_score or 0)))
     affinity = (3.5 if followed_creator else 0.0) + max(-2.0, min(5.0, float(creator_affinity or 0)))
+    topic = max(-3.0, min(6.0, float(topic_affinity or 0)))
     explicit = 3.5 if liked else 0.0
     freshness = 3.2 * math.exp(-_age_hours(video.get("created_at")) / 72.0)
     exploration = 1.1 if not seen else -0.7
     repeat_penalty = -1.8 if recent_creator else 0.0
-    return engagement + watch + affinity + explicit + freshness + exploration + repeat_penalty
+    return engagement + watch + affinity + topic + explicit + freshness + exploration + repeat_penalty
 
 
 def rank_videos(videos: list[dict], signals: dict[str, dict] | None = None) -> list[dict]:
