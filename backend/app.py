@@ -1,4 +1,4 @@
-from fastapi import Header
+from fastapi import Header, HTTPException
 
 from main import app, feed as legacy_feed
 from recommendation_api import router as recommendation_router, recommendations
@@ -7,6 +7,7 @@ from creator_api import router as creator_router
 from monetization_api import router as monetization_router
 from payouts_api import router as payouts_router
 from security import install_security
+from payout_state import normalize_state, can_transition
 
 # Replace the default chronological For You handler without modifying the large legacy file.
 app.router.routes[:] = [
@@ -33,3 +34,12 @@ app.include_router(creator_router)
 app.include_router(monetization_router)
 app.include_router(payouts_router)
 install_security(app)
+
+# Internal lifecycle guard used by future admin/provider endpoints.
+# It intentionally does not expose a public route or move money by itself.
+def validate_payout_transition(current: str, target: str) -> str:
+    current_state = normalize_state(current)
+    target_state = normalize_state(target)
+    if not can_transition(current_state, target_state):
+        raise HTTPException(409, f"Invalid payout transition: {current_state} -> {target_state}")
+    return target_state
