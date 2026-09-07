@@ -2,6 +2,7 @@ from fastapi import Header
 
 from main import app, feed as legacy_feed
 from recommendation_api import router as recommendation_router, recommendations
+from security import install_security
 
 # Replace the default chronological For You handler without modifying the large legacy file.
 app.router.routes[:] = [
@@ -25,3 +26,4 @@ def personalized_feed(
 
 
 app.include_router(recommendation_router)
+install_security(app)
