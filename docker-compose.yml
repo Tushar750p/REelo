@@ -3,5 +3,24 @@ services:
     build: ./backend
     ports:
       - "8000:8000"
+    environment:
+      REELO_SECRET: ${REELO_SECRET:-local-development-secret}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
     volumes:
-      - ./backend/media:/app/media
+      - reelo_media:/app/media
+      - reelo_db:/app
+    restart: unless-stopped
+
+  web:
+    image: nginx:alpine
+    ports:
+      - "5173:80"
+    volumes:
+      - ./app:/usr/share/nginx/html:ro
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  reelo_media:
+  reelo_db:
