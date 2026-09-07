@@ -10,15 +10,14 @@ from admin_payouts_api import router as admin_payouts_router
 from admin_moderation_api import router as admin_moderation_router
 from community_actions_api import router as community_actions_router, blocked_ids
 from trending_api import router as trending_router
+from topics_api import router as topics_router
 from security import install_security
 from payout_state import normalize_state, can_transition
 
-# Replace the default chronological For You handler without modifying the large legacy file.
 app.router.routes[:] = [
     route for route in app.router.routes
     if not (getattr(route, "path", None) == "/api/feed" and "GET" in getattr(route, "methods", set()))
 ]
-
 
 def filter_blocked(result, authorization):
     uid = current_user(authorization)
@@ -31,14 +30,8 @@ def filter_blocked(result, authorization):
     result["items"] = [item for item in result["items"] if str(item.get("user_id", "")) not in blocked]
     return result
 
-
 @app.get("/api/feed")
-def personalized_feed(
-    limit: int = 20,
-    following: bool = False,
-    mode: str | None = None,
-    authorization: str | None = Header(default=None),
-):
+def personalized_feed(limit: int = 20, following: bool = False, mode: str | None = None, authorization: str | None = Header(default=None)):
     if mode is not None:
         following = mode.strip().lower() == "following"
     if following:
@@ -49,6 +42,7 @@ def personalized_feed(
 
 app.include_router(recommendation_router)
 app.include_router(trending_router)
+app.include_router(topics_router)
 app.include_router(moderation_router)
 app.include_router(creator_router)
 app.include_router(monetization_router)
@@ -58,7 +52,6 @@ app.include_router(admin_moderation_router)
 app.include_router(community_actions_router)
 install_security(app)
 
-# Internal lifecycle guard used by future admin/provider endpoints.
 def validate_payout_transition(current: str, target: str) -> str:
     current_state = normalize_state(current)
     target_state = normalize_state(target)
