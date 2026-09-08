@@ -6,7 +6,7 @@ services:
     environment:
       REELO_SECRET: ${REELO_SECRET:-local-development-secret}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
-      LIVEKIT_URL: ${LIVEKIT_URL:-http://livekit:7880}
+      LIVEKIT_URL: ${LIVEKIT_URL:-http://localhost:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecret}
     volumes:
