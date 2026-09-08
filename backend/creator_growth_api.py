@@ -13,7 +13,7 @@ def uid_or_401(authorization):
     return uid
 
 
-def ensure_table(c):
+def ensure_table(c, uid):
     c.execute("""
         CREATE TABLE IF NOT EXISTS creator_growth_goals(
             creator_id TEXT PRIMARY KEY,
@@ -23,6 +23,22 @@ def ensure_table(c):
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS creator_follower_history(
+            creator_id TEXT NOT NULL,
+            day TEXT NOT NULL,
+            followers INTEGER NOT NULL,
+            PRIMARY KEY(creator_id,day)
+        )
+    """)
+    user = c.execute("SELECT followers FROM users WHERE id=?", (uid,)).fetchone()
+    if not user:
+        raise HTTPException(404, "User not found")
+    c.execute("""
+        INSERT INTO creator_follower_history(creator_id,day,followers)
+        VALUES(?,date('now'),?)
+        ON CONFLICT(creator_id,day) DO UPDATE SET followers=excluded.followers
+    """, (uid, int(user["followers"] or 0)))
 
 
 def metric(c, uid, action_sql, days=7):
@@ -32,11 +48,6 @@ def metric(c, uid, action_sql, days=7):
         WHERE v.user_id=? AND e.created_at>=date('now',?)
     """, (uid, f"-{max(1, days)-1} day")).fetchone()
     return int(row["value"] or 0)
-
-
-def followers(c, uid):
-    row = c.execute("SELECT followers FROM users WHERE id=?", (uid,)).fetchone()
-    return int(row["followers"] or 0) if row else 0
 
 
 def theme_tokens(text):
@@ -60,15 +71,14 @@ def pct(current, target):
 def growth_plan(authorization: str | None = Header(default=None)):
     uid = uid_or_401(authorization)
     with db() as c:
-        ensure_table(c)
+        ensure_table(c, uid)
         row = c.execute("SELECT weekly_views,weekly_followers,weekly_interactions FROM creator_growth_goals WHERE creator_id=?", (uid,)).fetchone()
         goal = dict(row) if row else {"weekly_views": 0, "weekly_followers": 0, "weekly_interactions": 0}
         views = metric(c, uid, "e.action='view'", 7)
         interactions = metric(c, uid, "e.action IN ('like','comment','share','save')", 7)
-        current_followers = followers(c, uid)
         seven_days_ago = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
         old = c.execute("SELECT followers FROM creator_follower_history WHERE creator_id=? AND day<=? ORDER BY day DESC LIMIT 1", (uid, seven_days_ago)).fetchone()
-        follower_gain = max(0, current_followers - int(old["followers"] or current_followers)) if old else 0
+        follower_gain = max(0, int(c.execute("SELECT followers FROM users WHERE id=?", (uid,)).fetchone()["followers"] or 0) - int(old["followers"] or 0)) if old else 0
         top_times = c.execute("""
             SELECT CAST(strftime('%w',e.created_at) AS INTEGER) weekday,
                    CAST(strftime('%H',e.created_at) AS INTEGER) hour,
@@ -136,7 +146,7 @@ def update_goals(weekly_views:int=0, weekly_followers:int=0, weekly_interactions
     uid = uid_or_401(authorization)
     values = [max(0, min(int(x), 10_000_000)) for x in (weekly_views, weekly_followers, weekly_interactions)]
     with db() as c:
-        ensure_table(c)
+        ensure_table(c, uid)
         c.execute("""
             INSERT INTO creator_growth_goals(creator_id,weekly_views,weekly_followers,weekly_interactions,updated_at)
             VALUES(?,?,?,?,CURRENT_TIMESTAMP)
