@@ -10,7 +10,7 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
       REELO_REDIS_URL: redis://redis:6379/0
-      REELO_DATABASE_URL: ${REELO_DATABASE_URL:-sqlite:///reelo.db}
+      REELO_DATABASE_URL: ${REELO_DATABASE_URL:-postgresql://reelo:reelo@postgres:5432/reelo}
       REELO_ENV: ${REELO_ENV:-development}
       REELO_RATE_LIMIT: ${REELO_RATE_LIMIT:-120}
       REELO_RATE_WINDOW_SECONDS: ${REELO_RATE_WINDOW_SECONDS:-60}
@@ -18,13 +18,29 @@ services:
       REELO_CDN_BASE_URL: ${REELO_CDN_BASE_URL:-}
     volumes:
       - reelo_media:/app/media
-      - reelo_db:/app
     restart: unless-stopped
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
       livekit:
         condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-reelo}
+      POSTGRES_USER: ${POSTGRES_USER:-reelo}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - reelo_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
@@ -81,5 +97,5 @@ services:
 
 volumes:
   reelo_media:
-  reelo_db:
+  reelo_postgres:
   reelo_redis:
