@@ -1,17 +1,20 @@
 """Backend-neutral DB gateway for REelo's core API.
 
 SQLite remains the default. PostgreSQL uses a bounded psycopg connection pool
-with lazy startup, connection health checks, and configurable timeouts.
+when REELO_DATABASE_URL points to PostgreSQL. The public db() context keeps the
+existing SQLite-style API while returning pooled connections safely.
 """
+import atexit
 import os
 import re
 import sqlite3
 from pathlib import Path
-
-_PG_POOL = None
+from threading import Lock
 
 
 class _PGRow(dict):
+    """Mapping row that also supports SQLite-style numeric indexing."""
+
     def __init__(self, values, columns):
         super().__init__(zip(columns, values))
         self._columns = tuple(columns)
@@ -39,7 +42,9 @@ class _PGResult:
 
     def fetchone(self):
         row = self._cursor.fetchone()
-        return None if row is None else _PGRow(row, self._columns)
+        if row is None:
+            return None
+        return _PGRow(row, self._columns)
 
     def fetchall(self):
         return [_PGRow(row, self._columns) for row in self._cursor.fetchall()]
@@ -49,18 +54,32 @@ class _PGResult:
 
 
 class _PGConnection:
-    """Compatibility wrapper that borrows a pooled connection per context."""
-
     def __init__(self, pool):
-        self.pool = pool
+        self._pool = pool
+        self._pool_context = None
         self.conn = None
-        self._context = None
+
+    def _ensure_connection(self):
+        if self.conn is None:
+            timeout = float(os.getenv("REELO_DB_POOL_TIMEOUT", "5"))
+            self._pool_context = self._pool.connection(timeout=timeout)
+            self.conn = self._pool_context.__enter__()
+        return self.conn
 
     @staticmethod
     def _sql(sql: str) -> str:
         sql = sql.replace("?", "%s")
-        sql = re.sub(r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)", r"GREATEST(\1, \2)", sql, flags=re.IGNORECASE)
-        match = re.search(r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)",
+            r"GREATEST(\1, \2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        match = re.search(
+            r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)",
+            sql,
+            flags=re.IGNORECASE,
+        )
         if match:
             table = match.group(2).replace("'", "''")
             return (
@@ -73,14 +92,19 @@ class _PGConnection:
                 "WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=current_schema() "
                 f"AND tc.table_name='{table}' AND kcu.column_name=c.column_name) THEN 1 ELSE 0 END AS pk "
                 "FROM information_schema.columns c "
-                f"WHERE table_schema=current_schema() AND table_name='{table}' ORDER BY ordinal_position"
+                f"WHERE table_schema=current_schema() AND table_name='{table}' "
+                "ORDER BY ordinal_position"
             )
-        return re.sub(r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)", r"ALTER TABLE \1 ADD COLUMN IF NOT EXISTS \2", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)",
+            r"ALTER TABLE \1 ADD COLUMN IF NOT EXISTS \2",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        return sql
 
     def execute(self, sql, params=()):
-        if self.conn is None:
-            raise RuntimeError("Database connection is not acquired; use 'with db() as conn'.")
-        cur = self.conn.cursor()
+        cur = self._ensure_connection().cursor()
         cur.execute(self._sql(sql), tuple(params or ()))
         return _PGResult(cur)
 
@@ -91,16 +115,21 @@ class _PGConnection:
                 self.execute(statement)
 
     def __enter__(self):
-        self._context = self.pool.connection(timeout=float(os.getenv("REELO_DB_POOL_TIMEOUT", "5")))
-        self.conn = self._context.__enter__()
+        self._ensure_connection()
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        try:
-            return self._context.__exit__(exc_type, exc, tb)
-        finally:
-            self.conn = None
-            self._context = None
+        if self._pool_context is not None:
+            try:
+                self._pool_context.__exit__(exc_type, exc, tb)
+            finally:
+                self._pool_context = None
+                self.conn = None
+        return False
+
+
+_POOL = None
+_POOL_LOCK = Lock()
 
 
 def using_postgres() -> bool:
@@ -108,49 +137,75 @@ def using_postgres() -> bool:
     return url.startswith(("postgres://", "postgresql://"))
 
 
-def _get_postgres_pool():
-    global _PG_POOL
-    if _PG_POOL is not None and not _PG_POOL.closed:
-        return _PG_POOL
-    from psycopg_pool import ConnectionPool
+def _postgres_pool():
+    global _POOL
+    if _POOL is not None:
+        return _POOL
+    with _POOL_LOCK:
+        if _POOL is None:
+            from psycopg_pool import ConnectionPool
 
-    connect_timeout = int(os.getenv("REELO_DB_CONNECT_TIMEOUT", "5"))
-    min_size = int(os.getenv("REELO_DB_POOL_MIN", "1"))
-    max_size = int(os.getenv("REELO_DB_POOL_MAX", "10"))
-    pool_timeout = float(os.getenv("REELO_DB_POOL_TIMEOUT", "5"))
-    if min_size < 0 or max_size < max(1, min_size):
-        raise RuntimeError("Invalid REELO_DB_POOL_MIN/REELO_DB_POOL_MAX configuration")
-
-    _PG_POOL = ConnectionPool(
-        conninfo=os.environ["REELO_DATABASE_URL"],
-        min_size=min_size,
-        max_size=max_size,
-        open=False,
-        kwargs={"connect_timeout": connect_timeout},
-        timeout=pool_timeout,
-        check=ConnectionPool.check_connection,
-        name="reelo-api",
-    )
-    _PG_POOL.open()
-    return _PG_POOL
+            min_size = max(1, int(os.getenv("REELO_DB_POOL_MIN", "1")))
+            max_size = max(min_size, int(os.getenv("REELO_DB_POOL_MAX", "10")))
+            connect_timeout = int(os.getenv("REELO_DB_CONNECT_TIMEOUT", "5"))
+            _POOL = ConnectionPool(
+                conninfo=os.environ["REELO_DATABASE_URL"],
+                min_size=min_size,
+                max_size=max_size,
+                open=False,
+                timeout=float(os.getenv("REELO_DB_POOL_TIMEOUT", "5")),
+                kwargs={"connect_timeout": connect_timeout},
+                check=ConnectionPool.check_connection,
+            )
+            _POOL.open(wait=False)
+    return _POOL
 
 
-def close_postgres_pool() -> None:
-    global _PG_POOL
-    if _PG_POOL is not None:
-        _PG_POOL.close()
-        _PG_POOL = None
+def open_pool(wait=False):
+    """Open the PostgreSQL pool explicitly, optionally waiting for min_size."""
+    if not using_postgres():
+        return False
+    pool = _postgres_pool()
+    if not pool.closed:
+        if wait:
+            pool.wait(timeout=float(os.getenv("REELO_DB_CONNECT_TIMEOUT", "5")))
+        return True
+    raise RuntimeError("PostgreSQL connection pool is closed and cannot be reopened")
 
 
-def postgres_pool_stats() -> dict:
-    if _PG_POOL is None or _PG_POOL.closed:
-        return {"enabled": False}
-    return {"enabled": True, **_PG_POOL.get_stats()}
+def close_pool():
+    """Close the PostgreSQL pool and release all idle resources."""
+    global _POOL
+    with _POOL_LOCK:
+        if _POOL is not None:
+            _POOL.close()
+            _POOL = None
+
+
+def pool_status() -> dict:
+    """Return safe pool metrics without exposing connection credentials."""
+    if not using_postgres():
+        return {"enabled": False, "backend": "sqlite"}
+    pool = _postgres_pool()
+    stats = pool.get_stats()
+    return {
+        "enabled": True,
+        "backend": "postgresql",
+        "closed": pool.closed,
+        "pool_min": pool.min_size,
+        "pool_max": pool.max_size,
+        "pool_size": stats.get("pool_size", 0),
+        "pool_available": stats.get("pool_available", 0),
+        "requests_waiting": stats.get("requests_waiting", 0),
+    }
+
+
+atexit.register(close_pool)
 
 
 def db():
     if using_postgres():
-        return _PGConnection(_get_postgres_pool())
+        return _PGConnection(_postgres_pool())
     db_path = Path(__file__).parent / "reelo.db"
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
