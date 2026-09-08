@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from main import db, current_user
 
 router = APIRouter(prefix="/api/live", tags=["live-gifts"])
+coin_router = APIRouter(prefix="/api/coins", tags=["coins"])
 
 GIFTS = {
     "rose": {"name": "Rose", "coins": 1, "emoji": "🌹"},
@@ -113,3 +114,33 @@ def creator_earnings(room_id: str, authorization: str | None = Header(default=No
         total = c.execute("SELECT COALESCE(SUM(gross_coins),0),COALESCE(SUM(creator_coins),0),COALESCE(SUM(platform_coins),0),COUNT(*) FROM live_creator_earnings WHERE room_id=?", (room_id,)).fetchone()
         rows = c.execute("SELECT gift_id,gross_coins,creator_coins,created_at FROM live_creator_earnings WHERE room_id=? ORDER BY id DESC LIMIT 100", (room_id,)).fetchall()
     return {"room_id": room_id, "gross_coins": int(total[0]), "creator_coins": int(total[1]), "platform_coins": int(total[2]), "gift_count": int(total[3]), "items": [dict(r) | {"gift": GIFTS.get(r["gift_id"], {})} for r in rows], "note": "Creator share is virtual coin accounting; payout requires a verified production payment system."}
+
+
+@coin_router.get("/wallet")
+def coin_wallet(authorization: str | None = Header(default=None)):
+    uid = uid_from(authorization)
+    with db() as c:
+        ensure_tables(c)
+        row = c.execute("SELECT balance FROM coin_wallets WHERE user_id=?", (uid,)).fetchone()
+    return {"balance": int(row[0]) if row else 0, "currency": "coins"}
+
+
+@coin_router.get("/packages")
+def coin_packages(authorization: str | None = Header(default=None)):
+    uid_from(authorization)
+    return {"items": [{"id": k, **v} for k, v in COIN_PACKAGES.items()], "mode": "demo"}
+
+
+@coin_router.post("/topup")
+def coin_topup(data: TopupRequest, authorization: str | None = Header(default=None)):
+    uid = uid_from(authorization)
+    package = COIN_PACKAGES.get(data.package_id.strip().lower())
+    if not package:
+        raise HTTPException(400, "Invalid coin package")
+    with db() as c:
+        ensure_tables(c); t = now()
+        row = c.execute("SELECT balance FROM coin_wallets WHERE user_id=?", (uid,)).fetchone()
+        old = int(row[0]) if row else 0; new = old + package["coins"]
+        c.execute("INSERT INTO coin_wallets(user_id,balance,updated_at) VALUES(?,?,?) ON CONFLICT(user_id) DO UPDATE SET balance=excluded.balance,updated_at=excluded.updated_at", (uid,new,t))
+        c.execute("INSERT INTO coin_transactions(user_id,amount,kind,reference,created_at) VALUES(?,?,?,?,?)", (uid,package["coins"],"demo_topup",data.package_id,t))
+    return {"ok": True, "added": package["coins"], "balance": new, "mode": "demo", "note": "No real-money payment was processed."}
