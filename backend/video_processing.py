@@ -179,6 +179,6 @@ def start_video_worker():
         # Resume videos that were uploaded before the worker started.
         with db() as c:
             ensure_tables(c)
-            rows = c.execute("SELECT v.id FROM videos v LEFT JOIN video_processing p ON p.video_id=v.id WHERE v.status='ready' AND p.video_id IS NULL AND v.filename NOT LIKE 'http%' LIMIT 20").fetchall()
+            rows = c.execute("SELECT v.id FROM videos v LEFT JOIN video_processing p ON p.video_id=v.id WHERE v.status='ready' AND p.video_id IS NULL AND v.filename NOT LIKE ? LIMIT 20", ("http%",)).fetchall()
         for row in rows:
             enqueue_video(row["id"])
