@@ -40,7 +40,7 @@ def payout_summary(authorization: str | None = Header(default=None)):
         live_coins = live_coin_balance(c, uid)
         ensure_payout_tables(c)
         pending = c.execute("SELECT COALESCE(SUM(amount_cents),0) FROM payout_requests WHERE user_id=? AND status IN ('pending','processing')", (uid,)).fetchone()[0]
-    return {'video_earnings_cents': int(dashboard.get('estimated_earnings_cents',0) or 0), 'video_available_cents': video_available, 'live_creator_coins': live_coins, 'pending_payout_cents': int(pending or 0), 'minimum_payout_cents': MIN_PAYOUT_CENTS, 'live_payout_conversion': None, 'note': 'LIVE gift earnings are shown in creator coins and are not converted to INR until a verified payout policy is configured.'}
+    return {'video_earnings_cents': int(dashboard.get('estimated_earnings_cents',0) or 0), 'video_available_cents': video_available, 'live_creator_coins': live_coins, 'pending_payout_cents': int(pending or 0), 'minimum_payout_cents': MIN_PAYOUT_CENTS, 'monetization_eligible': bool(dashboard.get('eligible')), 'verification_status': dashboard.get('verification_status','not_started'), 'live_payout_conversion': None, 'note': 'LIVE gift earnings are shown in creator coins and are not converted to INR until a verified payout policy is configured.'}
 
 
 @router.get('/methods')
@@ -77,6 +77,7 @@ def request_payout(method_id: str, authorization: str | None = Header(default=No
         method = c.execute('SELECT id FROM payout_methods WHERE id=? AND user_id=?', (method_id, uid)).fetchone()
         if not method: raise HTTPException(404, 'Payout method not found')
         dashboard = build_dashboard(c, uid)
+        if dashboard.get('verification_status') != 'approved': raise HTTPException(403, 'Creator verification must be approved before requesting a payout')
         if not dashboard['eligible']: raise HTTPException(403, 'Creator is not eligible for monetization')
         amount = balance_cents(c, uid)
         if amount < MIN_PAYOUT_CENTS: raise HTTPException(400, 'Minimum payout balance is ₹10.00')
