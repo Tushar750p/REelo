@@ -43,6 +43,7 @@ from security import install_security
 from enforcement import install_enforcement
 from production_hardening import router as system_router, install_rate_limit
 from payout_state import normalize_state, can_transition
+from safety_guard import install_safety_guard
 
 app.router.routes[:] = [route for route in app.router.routes if not (getattr(route, "path", None) == "/api/feed" and "GET" in getattr(route, "methods", set()))]
 
@@ -66,6 +67,7 @@ app.include_router(recommendation_router);app.include_router(recommendation_feed
 def start_background_workers():
     start_video_worker()
 
+install_safety_guard(app)
 install_security(app)
 install_enforcement(app)
 install_rate_limit(app)
