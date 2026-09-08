@@ -4,6 +4,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 from threading import Lock
 from main import current_user, db
+from automated_moderation import moderate_text
 
 router = APIRouter(prefix="/api/messages", tags=["messaging-v2"])
 _typing = {}
@@ -65,6 +66,9 @@ def send_message(user_id:str,data:MessageIn,authorization:str|None=Header(defaul
     uid=require_user(authorization); body=data.body.strip()
     if uid==user_id: raise HTTPException(400,"Cannot message yourself")
     if not body or len(body)>2000: raise HTTPException(400,"Message must be 1-2000 characters")
+    safety=moderate_text(body)
+    if safety.action=="review": raise HTTPException(400,"Message blocked by safety filters")
+    if safety.action=="limit": raise HTTPException(400,"Message contains content that cannot be sent")
     with db() as c:
         ensure_tables(c)
         if not c.execute("SELECT 1 FROM users WHERE id=?",(user_id,)).fetchone(): raise HTTPException(404,"User not found")
