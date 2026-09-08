@@ -14,6 +14,10 @@ class _PGResult:
     def __init__(self, cursor):
         self._cursor = cursor
 
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
     def fetchone(self):
         row = self._cursor.fetchone()
         if row is None:
@@ -25,10 +29,6 @@ class _PGResult:
 
     def __iter__(self):
         return iter(self.fetchall())
-
-    @property
-    def rowcount(self):
-        return self._cursor.rowcount
 
 
 class _Row(dict):
@@ -113,8 +113,8 @@ def using_postgres() -> bool:
 def db():
     if using_postgres():
         import psycopg
-        from psycopg.rows import tuple_row
-        return _PGConnection(psycopg.connect(os.environ["REELO_DATABASE_URL"], row_factory=tuple_row))
+        from psycopg.rows import dict_row
+        return _PGConnection(psycopg.connect(os.environ["REELO_DATABASE_URL"], row_factory=dict_row))
     db_path = Path(__file__).parent / "reelo.db"
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
