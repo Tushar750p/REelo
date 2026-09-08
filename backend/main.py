@@ -7,7 +7,6 @@ from uuid import uuid4
 import hashlib, hmac, os, secrets, sqlite3
 from database_gateway import db
 from automated_moderation import moderate_text
-from video_processing import enqueue_video
 
 ROOT=Path(__file__).parent
 MEDIA=ROOT/"media"
@@ -122,6 +121,7 @@ async def upload_video(file:UploadFile=File(...),caption:str=Form(""),authorizat
     vid=uuid4().hex
     with db() as c:c.execute("INSERT INTO videos(id,user_id,filename,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?)",(vid,uid,name,caption,total,mime,"ready"))
     try:
+        from video_processing import enqueue_video
         enqueue_video(vid)
     except Exception:
         with db() as c:c.execute("UPDATE videos SET status='ready' WHERE id=?",(vid,))
