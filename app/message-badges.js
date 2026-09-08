@@ -8,7 +8,7 @@
     if (!b) {
       b = document.createElement('span');
       b.dataset.reeloBadge = id;
-      b.style.cssText = 'position:absolute;top:2px;right:8px;min-width:17px;height:17px;padding:0 5px;border-radius:999px;background:#fff;color:#000;font:800 10px/17px system-ui;text-align:center;box-shadow:0 2px 10px #000;display:none;z-index:9;';
+      b.style.cssText = 'position:absolute;top:1px;right:5px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:#fff;color:#000;font:800 9px/16px system-ui;text-align:center;box-shadow:0 2px 10px #000;display:none;z-index:9;';
       if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
       el.appendChild(b);
     }
@@ -16,35 +16,43 @@
   }
 
   function setBadge(el, id, count) {
+    if (!el) return;
     const b = ensureBadge(el, id);
     const n = Number(count) || 0;
     b.textContent = n > 99 ? '99+' : String(n);
     b.style.display = n ? 'block' : 'none';
-    el.setAttribute('aria-label', (el.textContent || '').trim() + (n ? ', ' + n + ' unread' : ''));
+  }
+
+  function addInboxButton() {
+    const nav = document.querySelector('.bottom');
+    if (!nav || nav.querySelector('[data-reelo-inbox]')) return;
+    const activity = [...nav.querySelectorAll('button')].find(b => (b.textContent || '').trim().toLowerCase().startsWith('activity'));
+    if (!activity) return;
+    const b = document.createElement('button');
+    b.dataset.reeloInbox = '1';
+    b.innerHTML = '<span class="icon">✉</span>Messages';
+    b.onclick = () => { location.href = 'messages.html'; };
+    nav.insertBefore(b, activity);
   }
 
   async function refresh() {
+    addInboxButton();
     if (!token()) return;
     try {
       const [nr, mr] = await Promise.all([
-        fetch(API + '/api/notifications?limit=1', { headers: headers() }),
-        fetch(API + '/api/messages?limit=1', { headers: headers() })
+        fetch(API + '/api/notifications/summary', { headers: headers() }),
+        fetch(API + '/api/messages/unread/summary', { headers: headers() })
       ]);
-      if (!nr.ok && !mr.ok) return;
       const nd = nr.ok ? await nr.json() : {};
       const md = mr.ok ? await mr.json() : {};
-      document.querySelectorAll('.bottom button').forEach(btn => {
-        const text = (btn.textContent || '').trim().toLowerCase();
-        if (text.startsWith('activity')) setBadge(btn, 'activity', nd.unread_count || 0);
-      });
-      const profileLinks = document.querySelectorAll('a[href="messages.html"],a[href="/messages.html"]');
-      profileLinks.forEach(a => setBadge(a, 'messages', md.unread_count || 0));
+      const activity = [...document.querySelectorAll('.bottom button')].find(b => (b.textContent || '').trim().toLowerCase().startsWith('activity'));
+      const inbox = document.querySelector('[data-reelo-inbox]');
+      setBadge(activity, 'activity', nd.unread || 0);
+      setBadge(inbox, 'messages', md.total_unread || 0);
+      document.querySelectorAll('#message').forEach(b => setBadge(b, 'profile-message', md.total_unread || 0));
     } catch (_) {}
   }
 
-  function scan() {
-    refresh();
-  }
-  scan();
-  setInterval(scan, 10000);
+  refresh();
+  setInterval(refresh, 10000);
 })();
