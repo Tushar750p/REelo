@@ -55,9 +55,15 @@ def _set_status(video_id: str, status: str, error: str = ""):
         c.execute("UPDATE video_processing SET status=?,error=?,updated_at=CURRENT_TIMESTAMP WHERE video_id=?", (status, error[:1000], video_id))
         if status == "processing":
             c.execute("UPDATE video_processing SET attempts=COALESCE(attempts,0)+1 WHERE video_id=?", (video_id,))
+        if status == "processing":
+            c.execute("UPDATE videos SET status='processing' WHERE id=?", (video_id,))
+        elif status == "ready":
+            c.execute("UPDATE videos SET status='ready' WHERE id=?", (video_id,))
+        elif status == "failed":
+            c.execute("UPDATE videos SET status='failed' WHERE id=?", (video_id,))
 
 
-def _make_hls(video_id: str, source: Path, base: str) -> str:
+def _make_hls(video_id: str, source: Path, base: str, source_width: int = 0, source_height: int = 0) -> str:
     ffmpeg = shutil.which("ffmpeg")
     if not ffmpeg:
         raise RuntimeError("FFmpeg is not installed")
@@ -65,17 +71,21 @@ def _make_hls(video_id: str, source: Path, base: str) -> str:
     hls_dir.mkdir(parents=True, exist_ok=True)
     playlists = []
     for profile, spec in VIDEO_PROFILES.items():
-        target_height = spec["height"]
+        target_height = min(source_height, spec["height"]) if source_height else spec["height"]
+        target_width = 0
+        if source_width and source_height:
+            target_width = max(2, int(round((source_width * target_height / source_height) / 2) * 2))
         playlist = hls_dir / f"{profile}.m3u8"
         cmd = [ffmpeg, "-y", "-i", str(source), "-vf", f"scale=-2:{target_height}", "-c:v", "libx264", "-preset", "veryfast", "-b:v", spec["video_bitrate"], "-c:a", "aac", "-b:a", "128k", "-f", "hls", "-hls_time", "4", "-hls_playlist_type", "vod", "-hls_flags", "independent_segments", "-hls_segment_filename", str(hls_dir / f"{profile}-%05d.ts"), str(playlist)]
         run = _run(cmd)
         if run.returncode != 0:
             raise RuntimeError(run.stderr.strip() or f"HLS generation failed for {profile}")
-        playlists.append((profile, playlist, spec["bandwidth"], target_height))
+        playlists.append((profile, playlist, spec["bandwidth"], target_width, target_height))
     master = hls_dir / "master.m3u8"
     lines = ["#EXTM3U", "#EXT-X-VERSION:3"]
-    for profile, playlist, bandwidth, height in playlists:
-        lines.extend([f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION=720x{height}", f"{profile}.m3u8"])
+    for profile, playlist, bandwidth, width, height in playlists:
+        resolution = f"{width}x{height}" if width else f"720x{height}"
+        lines.extend([f"#EXT-X-STREAM-INF:BANDWIDTH={bandwidth},RESOLUTION={resolution}", f"{profile}.m3u8"])
     master.write_text("\n".join(lines) + "\n", encoding="utf-8")
     with db() as c:
         ensure_tables(c)
@@ -125,10 +135,11 @@ def process_video(video_id: str, source: Path) -> dict:
             raise RuntimeError(run.stderr.strip() or f"Transcoding failed for {profile}")
         variants.append({"profile": profile, "filename": filename, "height": target_height, "url": f"/media/{filename}"})
 
-    hls_url = _make_hls(video_id, source, base)
+    hls_url = _make_hls(video_id, source, base, width, height)
     with db() as c:
         ensure_tables(c)
         c.execute("INSERT INTO video_processing(video_id,status,duration_seconds,width,height,thumbnail,error,updated_at) VALUES(?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(video_id) DO UPDATE SET status='ready',duration_seconds=excluded.duration_seconds,width=excluded.width,height=excluded.height,thumbnail=excluded.thumbnail,error='',updated_at=CURRENT_TIMESTAMP", (video_id, "ready", duration, width, height, thumb_name, ""))
+        c.execute("UPDATE videos SET status='ready' WHERE id=?", (video_id,))
         c.execute("DELETE FROM video_variants WHERE video_id=?", (video_id,))
         for item in variants:
             c.execute("INSERT INTO video_variants(id,video_id,profile,filename,width,height) VALUES(?,?,?,?,?,?)", (uuid4().hex, video_id, item["profile"], item["filename"], width or 0, item["height"]))
@@ -139,6 +150,7 @@ def enqueue_video(video_id: str):
     """Queue a video without blocking the upload request."""
     with db() as c:
         ensure_tables(c)
+        c.execute("UPDATE videos SET status='processing' WHERE id=?", (video_id,))
         c.execute("INSERT INTO video_processing(video_id,status,error,updated_at) VALUES(?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(video_id) DO UPDATE SET status='queued',error='',updated_at=CURRENT_TIMESTAMP", (video_id, "queued", ""))
     try:
         _jobs.put_nowait(video_id)
