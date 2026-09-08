@@ -21,14 +21,18 @@ def _content_text(video: dict) -> str:
 
 
 @router.get("/recommendations")
-def recommendations(limit: int = 20, authorization: str | None = Header(default=None)):
-    """Personalized For You candidates using behavior, creator and topic affinity."""
+def recommendations(limit: int = 20, offset: int = 0, authorization: str | None = Header(default=None)):
+    """Personalized For You candidates using behavior, creator/topic affinity and persistent preferences."""
     uid = current_user(authorization)
     if not uid:
         raise HTTPException(401, "Login required")
 
     limit = max(1, min(limit, 50))
+    offset = max(0, min(offset, 5000))
     with db() as c:
+        c.execute(
+            "CREATE TABLE IF NOT EXISTS blocked_users(blocker_id TEXT NOT NULL, blocked_id TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(blocker_id,blocked_id))"
+        )
         rows = c.execute(
             """
             SELECT v.*, u.username, u.display_name,
@@ -64,10 +68,14 @@ def recommendations(limit: int = 20, authorization: str | None = Header(default=
             LEFT JOIN likes l ON l.video_id=v.id AND l.user_id=?
             LEFT JOIN follows f ON f.following_id=v.user_id AND f.follower_id=?
             WHERE v.status='ready'
+              AND v.user_id<>?
+              AND NOT EXISTS (SELECT 1 FROM blocked_users b WHERE b.blocker_id=? AND b.blocked_id=v.user_id)
+              AND NOT EXISTS (SELECT 1 FROM events ni WHERE ni.user_id=? AND ni.video_id=v.id AND ni.action='not_interested' AND ni.created_at>=datetime('now','-90 days'))
+              AND NOT EXISTS (SELECT 1 FROM events mc JOIN videos mv ON mv.id=mc.video_id WHERE mc.user_id=? AND mc.action='mute_creator' AND mv.user_id=v.user_id AND mc.created_at>=datetime('now','-90 days'))
             ORDER BY v.created_at DESC
-            LIMIT 200
+            LIMIT 500
             """,
-            (uid, uid, uid, uid, uid, uid),
+            (uid, uid, uid, uid, uid, uid, uid, uid, uid),
         ).fetchall()
 
         history = c.execute(
@@ -82,8 +90,6 @@ def recommendations(limit: int = 20, authorization: str | None = Header(default=
         ).fetchall()
 
     videos = [dict(r) for r in rows]
-
-    # Build a compact per-user topic profile from recent positive/negative events.
     topic_profile: dict[str, float] = {}
     for row in history:
         topics = infer_topics(_content_text(dict(row)))
@@ -106,10 +112,13 @@ def recommendations(limit: int = 20, authorization: str | None = Header(default=
             "recent_creator": bool(video.pop("recent_creator")),
         }
 
-    ranked = rank_videos(videos, signals)[:limit]
+    ranked = rank_videos(videos, signals)
+    page = ranked[offset:offset + limit]
     return {
-        "items": ranked,
+        "items": page,
         "personalized": True,
         "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(page) < len(ranked),
         "topic_profile": sorted(topic_profile, key=topic_profile.get, reverse=True)[:5],
     }
