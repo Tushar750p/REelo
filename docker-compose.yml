@@ -1,4 +1,14 @@
 services:
+  migrate:
+    build: ./backend
+    command: ["python", "run_migrations.py"]
+    environment:
+      REELO_DATABASE_URL: ${REELO_DATABASE_URL:-postgresql://reelo:reelo@postgres:5432/reelo}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   api:
     build: ./backend
     ports:
@@ -20,6 +30,8 @@ services:
       - reelo_media:/app/media
     restart: unless-stopped
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
