@@ -5,6 +5,7 @@ from recommendation_api import router as recommendation_router, recommendations
 from recommendation_feedback_api import router as recommendation_feedback_router
 from profile_api import router as profile_router
 from messaging_api import router as messaging_router
+from stories_api import router as stories_router
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
@@ -48,6 +49,7 @@ app.include_router(recommendation_router)
 app.include_router(recommendation_feedback_router)
 app.include_router(profile_router)
 app.include_router(messaging_router)
+app.include_router(stories_router)
 app.include_router(trending_router)
 app.include_router(topics_router)
 app.include_router(smart_search_router)
