@@ -15,7 +15,7 @@ PERSONA_API='https://api.withpersona.com/api/v1'
 def tables(c):
     c.execute("CREATE TABLE IF NOT EXISTS creator_verifications(id TEXT PRIMARY KEY,user_id TEXT UNIQUE NOT NULL,legal_name TEXT NOT NULL,country TEXT NOT NULL DEFAULT 'IN',status TEXT NOT NULL DEFAULT 'pending',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)")
     cols={r[1] for r in c.execute('PRAGMA table_info(creator_verifications)').fetchall()}
-    for name,typ,default in [('kyc_status','TEXT','not_started'),('kyc_provider','TEXT',''),('kyc_reference','TEXT','')]:
+    for name,typ,default in [('kyc_status','TEXT','not_started'),('kyc_provider','TEXT',''),('kyc_reference','TEXT',''),('kyc_verification_url','TEXT','')]:
         if name not in cols: c.execute(f"ALTER TABLE creator_verifications ADD COLUMN {name} {typ} DEFAULT '{default}'")
     c.execute("CREATE TABLE IF NOT EXISTS kyc_webhook_events(event_id TEXT PRIMARY KEY,provider TEXT NOT NULL,event_name TEXT NOT NULL,created_at TEXT NOT NULL)")
 
@@ -43,22 +43,25 @@ def persona_request(method,path,payload=None):
 
 def persona_signature_valid(raw:bytes,header:str,secret:str):
     if not header or not secret: return False
-    parts={}
-    for item in header.split(','):
-        if '=' in item:
-            k,v=item.split('=',1); parts.setdefault(k.strip(),[]).append(v.strip())
-    ts=(parts.get('t') or [''])[0]
-    if not ts or not ts.isdigit(): return False
+    parts=[]
+    for token in header.replace(',',' ').split():
+        if '=' in token:
+            k,v=token.split('=',1); parts.append((k.strip(),v.strip()))
+    timestamps=[v for k,v in parts if k=='t' and v.isdigit()]
+    if not timestamps: return False
+    # Persona signatures are timestamped; accept a valid current timestamp and any
+    # matching v1 signature so secret rotation can be handled safely.
+    ts=timestamps[0]
     if abs(int(time.time())-int(ts))>300: return False
     expected=hmac.new(secret.encode(),(ts+'.').encode()+raw,hashlib.sha256).hexdigest()
-    return any(hmac.compare_digest(expected,v) for v in parts.get('v1',[]))
+    return any(k=='v1' and hmac.compare_digest(expected,v) for k,v in parts)
 
 @router.get('')
 def get_verification(authorization:str|None=Header(default=None)):
     u=uid(authorization)
     with db() as c:
         tables(c); review_tables(c)
-        r=c.execute('SELECT id,legal_name,country,status,kyc_status,kyc_provider,kyc_reference,created_at,updated_at FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
+        r=c.execute('SELECT id,legal_name,country,status,kyc_status,kyc_provider,kyc_reference,kyc_verification_url,created_at,updated_at FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
         result={'status':r['status'] if r else 'not_started','verification':dict(r) if r else None,'latest_review':None}
         if r:
             review=c.execute("SELECT status,reason,created_at FROM creator_verification_reviews WHERE verification_id=? ORDER BY created_at DESC LIMIT 1",(r['id'],)).fetchone()
@@ -89,11 +92,13 @@ def start_kyc(data:KycStartRequest,authorization:str|None=Header(default=None)):
     if not os.getenv('PERSONA_API_KEY','').strip() or not template:
         raise HTTPException(503,'Persona KYC is not configured. Add PERSONA_API_KEY and PERSONA_INQUIRY_TEMPLATE_ID.')
     with db() as c:
-        tables(c); r=c.execute('SELECT id,status,kyc_status,kyc_reference FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
+        tables(c); r=c.execute('SELECT id,status,kyc_status,kyc_reference,kyc_verification_url FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
         if not r: raise HTTPException(400,'Submit creator verification details first')
         if r['status']=='approved': return {'ok':True,'status':'approved'}
-        if r['kyc_status']=='verified': return {'ok':True,'status':'verified','reference':r['kyc_reference']}
-        reference='reelo_'+u
+        if r['kyc_status']=='verified': return {'ok':True,'status':'verified','reference':r['kyc_reference'],'verification_url':r['kyc_verification_url']}
+        if r['kyc_status']=='started' and r['kyc_verification_url']:
+            return {'ok':True,'status':'started','provider':'persona','reference':r['kyc_reference'],'inquiry_id':r['kyc_reference'],'verification_url':r['kyc_verification_url'],'resume':True}
+        reference='reelo_'+uuid4().hex
     payload={'data':{'attributes':{'inquiry-template-id':template,'reference-id':reference}}}
     result=persona_request('POST','/inquiries',payload)
     pdata=result.get('data') or {}; meta=result.get('meta') or {}; inquiry_id=pdata.get('id'); status=(pdata.get('attributes') or {}).get('status','pending')
@@ -101,7 +106,7 @@ def start_kyc(data:KycStartRequest,authorization:str|None=Header(default=None)):
     if not inquiry_id: raise HTTPException(502,'Persona returned no inquiry ID')
     with db() as c:
         tables(c)
-        c.execute("UPDATE creator_verifications SET kyc_status=?,kyc_provider='persona',kyc_reference=?,updated_at=? WHERE user_id=?",('started',inquiry_id,now(),u))
+        c.execute("UPDATE creator_verifications SET kyc_status=?,kyc_provider='persona',kyc_reference=?,kyc_verification_url=?,updated_at=? WHERE user_id=?",('started',inquiry_id,link or '',now(),u))
         notification(c,u,'verification_kyc_started')
     return {'ok':True,'status':'started','provider':'persona','reference':inquiry_id,'inquiry_id':inquiry_id,'status_from_provider':status,'verification_url':link}
 
