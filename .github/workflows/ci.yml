@@ -72,7 +72,7 @@ jobs:
 
       - name: Run PostgreSQL integration tests
         working-directory: backend
-        run: pytest -q test_postgres_integration.py test_postgres_api_contract.py test_postgres_http.py test_postgres_recovery.py test_postgres_query_performance.py
+        run: pytest -q test_postgres_integration.py test_postgres_api_contract.py test_postgres_http.py test_postgres_recovery.py test_postgres_query_performance.py test_video_processing.py test_video_playback_http.py
 
       - name: Run isolated smoke tests
         working-directory: backend
