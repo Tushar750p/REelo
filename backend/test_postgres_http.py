@@ -74,16 +74,18 @@ def test_core_http_flow(client):
     with db() as c:
         c.execute("UPDATE videos SET status='ready' WHERE id=?", (video_id,))
 
-    feed = client.get("/api/feed", headers={"Authorization": f"Bearer {token_b}"})
-    assert feed.status_code == 200
-    assert any(item["id"] == video_id for item in feed.json()["items"])
-
+    # Follow the creator before reading the feed: the feed contract prioritizes
+    # content from followed creators for a newly registered account.
     follow = client.post(
         f"/api/users/{user_a}/follow",
         headers={"Authorization": f"Bearer {token_b}"},
     )
     assert follow.status_code == 200
     assert follow.json()["action"] == "follow"
+
+    feed = client.get("/api/feed", headers={"Authorization": f"Bearer {token_b}"})
+    assert feed.status_code == 200
+    assert any(item["id"] == video_id for item in feed.json()["items"])
 
     like = client.post(
         f"/api/videos/{video_id}/like",
