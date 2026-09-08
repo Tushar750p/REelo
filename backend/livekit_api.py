@@ -5,15 +5,13 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
 from livekit import api
 
-from main import current_user
+from main import current_user, db
 
 router = APIRouter(prefix="/api/livekit", tags=["livekit"])
-
 
 class TokenRequest(BaseModel):
     room: str
     role: str = "viewer"
-
 
 def require_user(authorization):
     uid = current_user(authorization)
@@ -21,13 +19,24 @@ def require_user(authorization):
         raise HTTPException(401, "Login required")
     return uid
 
-
 def safe_room(value: str) -> str:
     value = re.sub(r"[^a-zA-Z0-9_-]", "", (value or ""))[:100]
     if not value:
         raise HTTPException(400, "Invalid LIVE room")
     return value
 
+def authorize_role(c, room, uid, role):
+    live = c.execute("SELECT user_id,status FROM live_rooms WHERE id=?", (room,)).fetchone()
+    if not live or live[1] != "live":
+        raise HTTPException(404, "LIVE room is not active")
+    owner = str(live[0]) == str(uid)
+    if role == "host" and not owner:
+        raise HTTPException(403, "Host permission required")
+    if role == "guest":
+        guest = c.execute("SELECT status FROM live_guests WHERE room_id=? AND guest_id=?", (room,uid)).fetchone()
+        if not guest or guest[0] != "accepted":
+            raise HTTPException(403, "Guest invitation not accepted")
+    return owner
 
 @router.post("/token")
 def create_livekit_token(data: TokenRequest, authorization: str | None = Header(default=None)):
@@ -36,26 +45,13 @@ def create_livekit_token(data: TokenRequest, authorization: str | None = Header(
     role = data.role.strip().lower()
     if role not in {"host", "viewer", "guest"}:
         raise HTTPException(400, "Invalid LIVE role")
-
     key = os.getenv("LIVEKIT_API_KEY")
     secret = os.getenv("LIVEKIT_API_SECRET")
     url = os.getenv("LIVEKIT_URL")
     if not key or not secret or not url:
         raise HTTPException(503, "Live streaming service is not configured")
-
+    with db() as c:
+        authorize_role(c, room, uid, role)
     can_publish = role in {"host", "guest"}
-    token = (
-        api.AccessToken(key, secret)
-        .with_identity(str(uid))
-        .with_grants(
-            api.VideoGrants(
-                room_join=True,
-                room=room,
-                can_publish=can_publish,
-                can_subscribe=True,
-                can_publish_data=True,
-            )
-        )
-        .to_jwt()
-    )
+    token = (api.AccessToken(key, secret).with_identity(str(uid)).with_grants(api.VideoGrants(room_join=True, room=room, can_publish=can_publish, can_subscribe=True, can_publish_data=True)).to_jwt())
     return {"token": token, "url": url, "room": room, "role": role}
