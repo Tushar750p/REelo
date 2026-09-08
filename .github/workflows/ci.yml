@@ -67,6 +67,10 @@ jobs:
         working-directory: backend
         run: pytest -q test_postgres_integration.py test_postgres_api_contract.py test_postgres_http.py test_postgres_recovery.py test_postgres_query_performance.py
 
+      - name: Run authentication contract tests
+        working-directory: backend
+        run: pytest -q test_auth_contract.py
+
       - name: Run isolated smoke tests
         working-directory: backend
         run: pytest -q test_smoke.py
