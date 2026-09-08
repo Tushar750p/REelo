@@ -34,7 +34,7 @@ def add_notification(c,recipient_id,actor_id,type_,video_id=None):
     c.execute("INSERT INTO notifications(id,recipient_id,actor_id,type,video_id) VALUES(?,?,?,?,?)",(uuid4().hex,recipient_id,actor_id,type_,video_id))
 def enforce_text(text,content_type):
     result=moderate_text(text)
-    if result.get("action") in {"review","limit"}: raise HTTPException(400,f"{content_type.capitalize()} blocked by safety checks")
+    if result.action in {"review","limit"}: raise HTTPException(400,f"{content_type.capitalize()} blocked by safety checks")
     return result
 
 def init_db():
