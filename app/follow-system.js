@@ -3,14 +3,34 @@
   const following=new Set(JSON.parse(localStorage.getItem('reelo_following')||'[]').map(String));
   const save=()=>localStorage.setItem('reelo_following',JSON.stringify([...following]));
   const token=()=>localStorage.getItem('reelo_token')||'';
-  const findVideo=card=>{const id=card?.getAttribute('data-id');return id&&Array.isArray(window.feedItems)?window.feedItems.find(v=>String(v.id)===String(id)):null};
-  const findCreator=card=>{const v=findVideo(card);return v?.user_id?String(v.user_id):null};
+  const findVideo=card=>{
+    const id=card?.getAttribute('data-id');
+    if(!id)return null;
+    if(Array.isArray(window.feedItems))return window.feedItems.find(v=>String(v.id)===String(id))||null;
+    return null;
+  };
+  const findCreator=card=>{
+    const direct=card?.getAttribute('data-user-id')||card?.dataset?.userId;
+    if(direct)return String(direct);
+    const btn=card?.querySelector('.follow');
+    const attrs=['data-user-id','data-user','data-creator-id'];
+    for(const key of attrs){const v=btn?.getAttribute(key);if(v)return String(v)}
+    const onclick=btn?.getAttribute('onclick')||'';
+    const m=onclick.match(/['\"]([^'\"]+)['\"]/);
+    if(m&&m[1]&&!/^https?:/i.test(m[1]))return String(m[1]);
+    const v=findVideo(card);
+    return v?.user_id?String(v.user_id):null;
+  };
+  const creatorName=card=>{
+    const v=findVideo(card);
+    if(v?.username)return String(v.username).replace(/^@/,'');
+    const el=card?.querySelector('.username,.handle,[data-username]');
+    return String(el?.getAttribute('data-username')||el?.textContent||'creator').trim().replace(/^@/,'')||'creator';
+  };
   const toast=msg=>{if(typeof window.toast==='function')window.toast(msg);};
   function paint(card){
     const btn=card?.querySelector('.follow'); if(!btn)return;
     const uid=findCreator(card); if(!uid)return;
-    const self=typeof window.me!=='undefined'&&window.me&&String(window.me.id||window.me.user?.id)===uid;
-    if(self){btn.style.display='none';return;}
     const active=following.has(uid);
     btn.textContent=active?'Following':'Follow';
     btn.setAttribute('aria-pressed',active?'true':'false');
@@ -27,7 +47,7 @@
       if(!r.ok)throw Error(d.detail||'Could not update follow status');
       if(d.action==='follow')following.add(uid);else following.delete(uid);
       save(); paint(card);
-      toast(d.action==='follow'?'Following @'+(findVideo(card)?.username||'creator'):'Unfollowed @'+(findVideo(card)?.username||'creator'));
+      toast(d.action==='follow'?'Following @'+creatorName(card):'Unfollowed @'+creatorName(card));
     }catch(e){toast(e.message||'Could not update follow status');}
     finally{if(btn)btn.disabled=false;}
   }
