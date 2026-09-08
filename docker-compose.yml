@@ -9,11 +9,19 @@ services:
       LIVEKIT_URL: ${LIVEKIT_URL:-http://localhost:7880}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
+      REELO_REDIS_URL: redis://redis:6379/0
+      REELO_ENV: ${REELO_ENV:-development}
+      REELO_RATE_LIMIT: ${REELO_RATE_LIMIT:-120}
+      REELO_RATE_WINDOW_SECONDS: ${REELO_RATE_WINDOW_SECONDS:-60}
+      REELO_OBJECT_STORAGE_BUCKET: ${REELO_OBJECT_STORAGE_BUCKET:-}
+      REELO_CDN_BASE_URL: ${REELO_CDN_BASE_URL:-}
     volumes:
       - reelo_media:/app/media
       - reelo_db:/app
     restart: unless-stopped
     depends_on:
+      redis:
+        condition: service_healthy
       livekit:
         condition: service_healthy
 
