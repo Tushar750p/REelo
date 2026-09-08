@@ -6,7 +6,10 @@ from main import current_user, db
 
 router = APIRouter(prefix="/api/recommendations", tags=["recommendation-learning"])
 
-ALLOWED = {"impression", "watch", "progress", "complete", "skip", "dismiss", "like", "comment", "share", "save", "rewatch"}
+ALLOWED = {
+    "impression", "watch", "progress", "complete", "skip", "dismiss",
+    "like", "comment", "share", "save", "rewatch", "not_interested", "mute_creator",
+}
 
 class FeedbackIn(BaseModel):
     video_id: str
@@ -23,8 +26,11 @@ def feedback(data: FeedbackIn, authorization: str | None = Header(default=None))
         raise HTTPException(400, "Unsupported feedback action")
     seconds = max(0.0, min(float(data.seconds or 0), 3600.0))
     with db() as c:
-        if not c.execute("SELECT 1 FROM videos WHERE id=? AND status='ready'", (data.video_id,)).fetchone():
+        video = c.execute("SELECT user_id FROM videos WHERE id=? AND status='ready'", (data.video_id,)).fetchone()
+        if not video:
             raise HTTPException(404, "Video not found")
+        if action == "mute_creator" and video["user_id"] == uid:
+            raise HTTPException(400, "Cannot mute yourself")
         c.execute(
             "INSERT INTO events(id,user_id,video_id,action,seconds) VALUES(?,?,?,?,?)",
             (uuid4().hex, uid, data.video_id, action, seconds),
@@ -49,3 +55,20 @@ def signals(authorization: str | None = Header(default=None)):
             (uid,),
         ).fetchall()
     return {"items": [dict(r) for r in rows]}
+
+@router.get("/preferences")
+def preferences(authorization: str | None = Header(default=None)):
+    uid = current_user(authorization)
+    if not uid:
+        raise HTTPException(401, "Login required")
+    with db() as c:
+        hidden = [r[0] for r in c.execute(
+            "SELECT DISTINCT video_id FROM events WHERE user_id=? AND action='not_interested' AND created_at>=datetime('now','-90 days')",
+            (uid,),
+        ).fetchall()]
+        muted = [r[0] for r in c.execute(
+            """SELECT DISTINCT v.user_id FROM events e JOIN videos v ON v.id=e.video_id
+               WHERE e.user_id=? AND e.action='mute_creator' AND e.created_at>=datetime('now','-90 days')""",
+            (uid,),
+        ).fetchall()]
+    return {"not_interested_video_ids": hidden, "muted_creator_ids": muted}
