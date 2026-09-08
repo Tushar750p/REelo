@@ -3,6 +3,7 @@ from fastapi import Header, HTTPException
 from main import app, feed as legacy_feed, db, current_user
 from recommendation_api import router as recommendation_router, recommendations
 from recommendation_feedback_api import router as recommendation_feedback_router
+from profile_api import router as profile_router
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
@@ -44,6 +45,7 @@ def personalized_feed(limit: int = 20, following: bool = False, mode: str | None
 
 app.include_router(recommendation_router)
 app.include_router(recommendation_feedback_router)
+app.include_router(profile_router)
 app.include_router(trending_router)
 app.include_router(topics_router)
 app.include_router(smart_search_router)
