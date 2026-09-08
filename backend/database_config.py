@@ -1,9 +1,4 @@
-"""Database configuration and migration-readiness helpers.
-
-REelo remains SQLite-first for local development. Production can opt into a
-PostgreSQL DSN without changing application code yet; this stage deliberately
-only validates/configures the target so the eventual migration is safe.
-"""
+"""Database configuration and migration-readiness helpers."""
 import os
 from urllib.parse import urlparse
 
@@ -25,9 +20,17 @@ def database_status() -> dict:
     url = database_url()
     backend = database_backend()
     parsed = urlparse(url) if backend != "unknown" else None
+    healthy = None
+    if backend == "postgresql":
+        try:
+            from postgres_adapter import healthcheck
+            healthy = healthcheck()
+        except Exception:
+            healthy = False
     return {
         "backend": backend,
         "configured": backend in {"sqlite", "postgresql"},
         "host": parsed.hostname if parsed and backend == "postgresql" else None,
         "migration_ready": backend == "postgresql",
+        "health": healthy,
     }
