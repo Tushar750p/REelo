@@ -8,6 +8,7 @@ from notifications import ensure_notifications_table
 router=APIRouter(prefix='/api/creator/verification',tags=['creator-verification'])
 class VerifyRequest(BaseModel): legal_name:str; country:str='IN'
 def tables(c): c.execute("CREATE TABLE IF NOT EXISTS creator_verifications(id TEXT PRIMARY KEY,user_id TEXT UNIQUE NOT NULL,legal_name TEXT NOT NULL,country TEXT NOT NULL DEFAULT 'IN',status TEXT NOT NULL DEFAULT 'pending',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)")
+def review_tables(c): c.execute("CREATE TABLE IF NOT EXISTS creator_verification_reviews(id TEXT PRIMARY KEY,verification_id TEXT NOT NULL,admin_id TEXT NOT NULL,status TEXT NOT NULL,reason TEXT DEFAULT '',created_at TEXT NOT NULL)")
 def uid(auth):
     x=current_user(auth)
     if not x: raise HTTPException(401,'Login required')
@@ -17,9 +18,12 @@ def now(): return datetime.now(timezone.utc).isoformat()
 def get_verification(authorization:str|None=Header(default=None)):
     u=uid(authorization)
     with db() as c:
-        tables(c); r=c.execute('SELECT id,legal_name,country,status,created_at,updated_at FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
-        result={'status':r['status'] if r else 'not_started','verification':dict(r) if r else None}
+        tables(c); review_tables(c)
+        r=c.execute('SELECT id,legal_name,country,status,created_at,updated_at FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
+        result={'status':r['status'] if r else 'not_started','verification':dict(r) if r else None,'latest_review':None}
         if r:
+            review=c.execute("SELECT status,reason,created_at FROM creator_verification_reviews WHERE verification_id=? ORDER BY created_at DESC LIMIT 1",(r['id'],)).fetchone()
+            if review: result['latest_review']=dict(review)
             ensure_notifications_table(c)
             n=c.execute("SELECT id,type,read,created_at FROM notifications WHERE recipient_id=? AND type LIKE 'verification_%' ORDER BY created_at DESC LIMIT 10",(u,)).fetchall()
             result['notifications']=[dict(x) for x in n]
