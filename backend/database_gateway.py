@@ -10,9 +10,29 @@ import sqlite3
 from pathlib import Path
 
 
+class _PGRow(dict):
+    """Mapping row that also supports SQLite-style numeric indexing."""
+
+    def __init__(self, values, columns):
+        super().__init__(zip(columns, values))
+        self._columns = tuple(columns)
+
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return dict.__getitem__(self, self._columns[key])
+        return dict.__getitem__(self, key)
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+
 class _PGResult:
     def __init__(self, cursor):
         self._cursor = cursor
+        self._columns = tuple(desc.name for desc in (cursor.description or ()))
 
     @property
     def rowcount(self):
@@ -22,21 +42,13 @@ class _PGResult:
         row = self._cursor.fetchone()
         if row is None:
             return None
-        return _Row(row)
+        return _PGRow(row, self._columns)
 
     def fetchall(self):
-        return [_Row(row) for row in self._cursor.fetchall()]
+        return [_PGRow(row, self._columns) for row in self._cursor.fetchall()]
 
     def __iter__(self):
         return iter(self.fetchall())
-
-
-class _Row(dict):
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError as exc:
-            raise AttributeError(name) from exc
 
 
 class _PGConnection:
@@ -45,15 +57,8 @@ class _PGConnection:
 
     @staticmethod
     def _sql(sql: str) -> str:
-        # Preserve the existing API's SQLite-style parameter markers.
         sql = sql.replace("?", "%s")
-        # SQLite accepts MAX(a, b) as a scalar two-argument function; PostgreSQL
-        # uses GREATEST(a, b) for the equivalent expression.
         sql = re.sub(r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)", r"GREATEST(\1, \2)", sql, flags=re.IGNORECASE)
-        # SQLite's PRAGMA table_info() is used by feature modules for additive
-        # schema checks. Translate it to information_schema with the same six
-        # positional fields those modules consume: cid, name, type, notnull,
-        # dflt_value, pk.
         match = re.search(r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)", sql, flags=re.IGNORECASE)
         if match:
             table = match.group(2).replace("'", "''")
@@ -70,8 +75,6 @@ class _PGConnection:
                 f"WHERE table_schema=current_schema() AND table_name='{table}' "
                 "ORDER BY ordinal_position"
             )
-        # PostgreSQL supports IF NOT EXISTS for additive columns; SQLite-style
-        # callers are intentionally left unchanged except for this safe upgrade.
         sql = re.sub(
             r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)",
             r"ALTER TABLE \1 ADD COLUMN IF NOT EXISTS \2",
@@ -113,8 +116,7 @@ def using_postgres() -> bool:
 def db():
     if using_postgres():
         import psycopg
-        from psycopg.rows import dict_row
-        return _PGConnection(psycopg.connect(os.environ["REELO_DATABASE_URL"], row_factory=dict_row))
+        return _PGConnection(psycopg.connect(os.environ["REELO_DATABASE_URL"]))
     db_path = Path(__file__).parent / "reelo.db"
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
