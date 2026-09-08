@@ -89,4 +89,5 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Migrate REelo SQLite data to PostgreSQL")
     parser.add_argument("--source", default="reelo.db", help="SQLite database path")
     parser.add_argument("--dry-run", action="store_true", help="Inspect tables/row counts without writing")
-    migrate(Path(parser.parse_args().source), dry_run=parser.parse_args().dry_run)
+    args = parser.parse_args()
+    migrate(Path(args.source), dry_run=args.dry_run)
