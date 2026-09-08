@@ -58,8 +58,17 @@ class _PGConnection:
     @staticmethod
     def _sql(sql: str) -> str:
         sql = sql.replace("?", "%s")
-        sql = re.sub(r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)", r"GREATEST(\1, \2)", sql, flags=re.IGNORECASE)
-        match = re.search(r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)", sql, flags=re.IGNORECASE)
+        sql = re.sub(
+            r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)",
+            r"GREATEST(\1, \2)",
+            sql,
+            flags=re.IGNORECASE,
+        )
+        match = re.search(
+            r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)",
+            sql,
+            flags=re.IGNORECASE,
+        )
         if match:
             table = match.group(2).replace("'", "''")
             return (
