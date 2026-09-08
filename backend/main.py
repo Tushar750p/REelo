@@ -74,7 +74,7 @@ def me(authorization:str|None=Header(default=None)):
     with db() as c:
         r=c.execute("SELECT * FROM users WHERE id=?",(uid,)).fetchone()
         if not r:raise HTTPException(401,"Session is invalid")
-        unread=c.execute("SELECT COUNT(*) FROM notifications WHERE recipient_id=? AND read=0").fetchone()[0]
+        unread=c.execute("SELECT COUNT(*) FROM notifications WHERE recipient_id=? AND read=0",(uid,)).fetchone()[0]
     return {"user":public_user(r),"unread_notifications":unread}
 @app.patch("/api/me")
 def update_me(data:ProfileUpdate,authorization:str|None=Header(default=None)):
