@@ -45,7 +45,7 @@ def test_core_http_flow(client):
     assert me.status_code == 200
     assert me.json()["user"]["username"] == username_a
 
-    # Exercise the real multipart upload path instead of inserting a video directly.
+    # Upload is asynchronous: the API stores the file and queues media processing.
     upload = client.post(
         "/api/videos/upload",
         files={"file": ("http-test.mp4", b"REelo PostgreSQL HTTP upload test", "video/mp4")},
@@ -56,7 +56,7 @@ def test_core_http_flow(client):
     uploaded = upload.json()
     video_id = uploaded["id"]
     filename = uploaded["filename"]
-    assert uploaded["status"] == "uploaded"
+    assert uploaded["status"] == "processing"
     assert uploaded["mime_type"] == "video/mp4"
     assert uploaded["size"] > 0
     assert uploaded["url"] == f"/media/{filename}"
@@ -67,6 +67,12 @@ def test_core_http_flow(client):
     media = client.get(uploaded["url"])
     assert media.status_code == 200
     assert media.content == b"REelo PostgreSQL HTTP upload test"
+
+    # The worker is asynchronous; make the stored record ready here so the
+    # remainder of this smoke test can exercise feed/social HTTP endpoints.
+    from main import db
+    with db() as c:
+        c.execute("UPDATE videos SET status='ready' WHERE id=?", (video_id,))
 
     feed = client.get("/api/feed", headers={"Authorization": f"Bearer {token_b}"})
     assert feed.status_code == 200
