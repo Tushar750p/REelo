@@ -27,6 +27,9 @@ def ensure_review_tables(c):
         previous_status TEXT NOT NULL, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL)''')
 
+def kyc_state(r):
+    return str(r['kyc_status'] or 'not_started').strip().lower()
+
 @router.get('')
 def list_verifications(status: str = 'pending', limit: int = 100, authorization: str | None = Header(default=None)):
     require_admin(authorization)
@@ -36,7 +39,7 @@ def list_verifications(status: str = 'pending', limit: int = 100, authorization:
     limit = max(1, min(limit, 200))
     with db() as c:
         tables(c); ensure_review_tables(c)
-        query = 'SELECT id,user_id,legal_name,country,status,created_at,updated_at FROM creator_verifications'
+        query = 'SELECT id,user_id,legal_name,country,status,kyc_status,kyc_provider,kyc_reference,created_at,updated_at FROM creator_verifications'
         args = []
         if status != 'all': query += ' WHERE status=?'; args.append(status)
         query += ' ORDER BY updated_at DESC LIMIT ?'; args.append(limit)
@@ -64,12 +67,15 @@ def update_verification(verification_id: str, body: StatusRequest, authorization
     now = datetime.now(timezone.utc).isoformat()
     with db() as c:
         tables(c); ensure_review_tables(c); ensure_notifications_table(c)
-        row = c.execute('SELECT id,user_id,status FROM creator_verifications WHERE id=?', (verification_id,)).fetchone()
+        row = c.execute('SELECT id,user_id,status,kyc_status,kyc_provider,kyc_reference FROM creator_verifications WHERE id=?', (verification_id,)).fetchone()
         if not row: raise HTTPException(404, 'Verification request not found')
         current = row['status']
+        kyc = kyc_state(row)
+        if target == 'approved' and kyc != 'verified':
+            raise HTTPException(409, f'Identity verification must be verified before creator approval (current KYC status: {kyc})')
         if current == 'approved' and target != 'approved': raise HTTPException(409, 'Approved verification cannot be changed here')
         c.execute('UPDATE creator_verifications SET status=?,updated_at=? WHERE id=?', (target, now, verification_id))
         c.execute('INSERT INTO creator_verification_reviews(id,verification_id,admin_user_id,previous_status,status,reason,created_at) VALUES(?,?,?,?,?,?,?)', (str(uuid4()), verification_id, admin_id, current, target, reason, now))
         if target in {'approved','rejected'} and current != target:
             c.execute('INSERT INTO notifications(id,recipient_id,actor_id,type,video_id) VALUES(?,?,?,?,?)', (uuid4().hex, row['user_id'], admin_id, 'verification_'+target, None))
-    return {'ok': True, 'id': verification_id, 'previous_status': current, 'status': target, 'reason': reason}
+    return {'ok': True, 'id': verification_id, 'previous_status': current, 'status': target, 'reason': reason, 'kyc_status': kyc}
