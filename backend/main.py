@@ -128,9 +128,15 @@ def like(video_id:str,authorization:str|None=Header(default=None)):
     with db() as c:
         video=c.execute("SELECT user_id FROM videos WHERE id=?",(video_id,)).fetchone()
         if not video:raise HTTPException(404,"Video not found")
-        x=c.execute("SELECT 1 FROM likes WHERE user_id=? AND video_id=?",(uid,video_id)).fetchone()
-        if x:c.execute("DELETE FROM likes WHERE user_id=? AND video_id=?",(uid,video_id));c.execute("UPDATE videos SET likes=MAX(likes-1,0) WHERE id=?",(video_id,));liked=False
-        else:c.execute("INSERT INTO likes(user_id,video_id) VALUES(?,?)",(uid,video_id));c.execute("UPDATE videos SET likes=likes+1 WHERE id=?",(video_id,));liked=True;add_notification(c,video["user_id"],uid,"like",video_id)
+        deleted=c.execute("DELETE FROM likes WHERE user_id=? AND video_id=?",(uid,video_id)).rowcount
+        if deleted:
+            c.execute("UPDATE videos SET likes=MAX(likes-1,0) WHERE id=?",(video_id,));liked=False
+        else:
+            inserted=c.execute("INSERT INTO likes(user_id,video_id) VALUES(?,?) ON CONFLICT(user_id,video_id) DO NOTHING",(uid,video_id)).rowcount
+            if inserted:
+                c.execute("UPDATE videos SET likes=likes+1 WHERE id=?",(video_id,));liked=True;add_notification(c,video["user_id"],uid,"like",video_id)
+            else:
+                liked=True
         n=c.execute("SELECT likes FROM videos WHERE id=?",(video_id,)).fetchone()[0]
     return {"liked":liked,"likes":n}
 @app.get("/api/videos/{video_id}/comments")
@@ -158,9 +164,15 @@ def follow(user_id:str,authorization:str|None=Header(default=None)):
     if uid==user_id:raise HTTPException(400,"Cannot follow yourself")
     with db() as c:
         if not c.execute("SELECT 1 FROM users WHERE id=?",(user_id,)).fetchone():raise HTTPException(404,"User not found")
-        x=c.execute("SELECT 1 FROM follows WHERE follower_id=? AND following_id=?",(uid,user_id)).fetchone()
-        if x:c.execute("DELETE FROM follows WHERE follower_id=? AND following_id=?",(uid,user_id));a="unfollow";c.execute("UPDATE users SET followers=MAX(followers-1,0) WHERE id=?",(user_id,));c.execute("UPDATE users SET following=MAX(following-1,0) WHERE id=?",(uid,))
-        else:c.execute("INSERT INTO follows(follower_id,following_id) VALUES(?,?)",(uid,user_id));a="follow";c.execute("UPDATE users SET followers=followers+1 WHERE id=?",(user_id,));c.execute("UPDATE users SET following=following+1 WHERE id=?",(uid,));add_notification(c,user_id,uid,"follow")
+        deleted=c.execute("DELETE FROM follows WHERE follower_id=? AND following_id=?",(uid,user_id)).rowcount
+        if deleted:
+            a="unfollow";c.execute("UPDATE users SET followers=MAX(followers-1,0) WHERE id=?",(user_id,));c.execute("UPDATE users SET following=MAX(following-1,0) WHERE id=?",(uid,))
+        else:
+            inserted=c.execute("INSERT INTO follows(follower_id,following_id) VALUES(?,?) ON CONFLICT(follower_id,following_id) DO NOTHING",(uid,user_id)).rowcount
+            if inserted:
+                a="follow";c.execute("UPDATE users SET followers=followers+1 WHERE id=?",(user_id,));c.execute("UPDATE users SET following=following+1 WHERE id=?",(uid,));add_notification(c,user_id,uid,"follow")
+            else:
+                a="follow"
     return {"action":a}
 @app.get("/api/notifications")
 def notifications(limit:int=50,offset:int=0,authorization:str|None=Header(default=None)):
