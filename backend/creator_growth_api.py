@@ -63,7 +63,7 @@ def growth_plan(authorization: str | None = Header(default=None)):
         ensure_table(c)
         row = c.execute("SELECT weekly_views,weekly_followers,weekly_interactions FROM creator_growth_goals WHERE creator_id=?", (uid,)).fetchone()
         goal = dict(row) if row else {"weekly_views": 0, "weekly_followers": 0, "weekly_interactions": 0}
-        views = metric(c, uid, "e.action='view',", 7)
+        views = metric(c, uid, "e.action='view'", 7)
         interactions = metric(c, uid, "e.action IN ('like','comment','share','save')", 7)
         current_followers = followers(c, uid)
         seven_days_ago = (datetime.utcnow() - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -85,11 +85,7 @@ def growth_plan(authorization: str | None = Header(default=None)):
             for token in set(theme_tokens(video["caption"])):
                 themes[token] = themes.get(token, 0) + 1
 
-    targets = {
-        "weekly_views": int(goal["weekly_views"] or 0),
-        "weekly_followers": int(goal["weekly_followers"] or 0),
-        "weekly_interactions": int(goal["weekly_interactions"] or 0),
-    }
+    targets = {"weekly_views": int(goal["weekly_views"] or 0), "weekly_followers": int(goal["weekly_followers"] or 0), "weekly_interactions": int(goal["weekly_interactions"] or 0)}
     progress = {
         "weekly_views": {"current": views, "target": targets["weekly_views"], "percent": pct(views, targets["weekly_views"])},
         "weekly_followers": {"current": follower_gain, "target": targets["weekly_followers"], "percent": pct(follower_gain, targets["weekly_followers"])},
@@ -130,7 +126,7 @@ def growth_plan(authorization: str | None = Header(default=None)):
         "actions": actions,
         "weekly_plan": weekly_plan,
         "milestones": milestones,
-        "strongest_windows":[{"weekday":int(r["weekday"]),"hour":int(r["hour"]),"label":f"{format_hour(r['hour'])}","views":int(r["views"] or 0),"interactions":int(r["interactions"] or 0)} for r in top_times],
+        "strongest_windows":[{"weekday":int(r["weekday"]),"hour":int(r["hour"]),"label":format_hour(r["hour"]),"views":int(r["views"] or 0),"interactions":int(r["interactions"] or 0)} for r in top_times],
         "note":"Growth guidance is based on your recorded REelo performance. It does not guarantee future growth or invent predictive metrics."
     }
 
