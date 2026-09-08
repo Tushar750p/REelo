@@ -125,7 +125,12 @@ def using_postgres() -> bool:
 def db():
     if using_postgres():
         import psycopg
-        return _PGConnection(psycopg.connect(os.environ["REELO_DATABASE_URL"]))
+        return _PGConnection(
+            psycopg.connect(
+                os.environ["REELO_DATABASE_URL"],
+                connect_timeout=int(os.getenv("REELO_DB_CONNECT_TIMEOUT", "5")),
+            )
+        )
     db_path = Path(__file__).parent / "reelo.db"
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
