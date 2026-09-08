@@ -7,6 +7,7 @@ from profile_api import router as profile_router
 from messaging_api import router as messaging_router
 from stories_api import router as stories_router
 from remix_api import router as remix_router
+from sounds_api import router as sounds_router
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
@@ -45,6 +46,7 @@ app.include_router(profile_router)
 app.include_router(messaging_router)
 app.include_router(stories_router)
 app.include_router(remix_router)
+app.include_router(sounds_router)
 app.include_router(trending_router)
 app.include_router(topics_router)
 app.include_router(smart_search_router)
