@@ -15,7 +15,8 @@ from live_ws import router as live_ws_router
 from livekit_api import router as livekit_router
 from live_guests_api import router as live_guests_router
 from live_moderation_api import router as live_moderation_router
-from live_gifts_api import router as live_gifts_router, coin_router
+from live_gifts_api import router as live_gifts_router
+from coins_api import router as coins_router
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
@@ -60,7 +61,7 @@ app.include_router(livekit_router)
 app.include_router(live_guests_router)
 app.include_router(live_moderation_router)
 app.include_router(live_gifts_router)
-app.include_router(coin_router)
+app.include_router(coins_router)
 app.include_router(trending_router)
 app.include_router(topics_router)
 app.include_router(smart_search_router)
