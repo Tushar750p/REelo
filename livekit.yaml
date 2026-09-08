@@ -1,0 +1,24 @@
+# REelo LiveKit production-style configuration.
+# Keep real credentials in environment/secret management, never in git.
+port: 7880
+bind_addresses:
+  - 0.0.0.0
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  port_range_start: 50000
+  port_range_end: 50020
+redis:
+  address: redis:6379
+keys:
+  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+turn:
+  enabled: ${LIVEKIT_TURN_ENABLED:false}
+  domain: ${LIVEKIT_TURN_DOMAIN:}
+  tls_port: ${LIVEKIT_TURN_TLS_PORT:5349}
+  udp_port: ${LIVEKIT_TURN_UDP_PORT:3478}
+logging:
+  level: info
+room:
+  auto_create: true
+  empty_timeout: 300
