@@ -1,9 +1,7 @@
 """Production infrastructure helpers for REelo.
 
-The module is intentionally dependency-free. It provides safe defaults for
-cache/rate-limit primitives while allowing Redis to be enabled later through
-REELO_REDIS_URL. Local fallback is process-local and should only be used for
-single-instance deployments.
+Uses Redis for distributed rate limiting when REELO_REDIS_URL is configured;
+otherwise keeps the process-local development fallback.
 """
 from collections import defaultdict, deque
 from threading import Lock
@@ -11,24 +9,39 @@ from time import monotonic
 import os
 
 WINDOW_SECONDS = max(1, int(os.getenv("REELO_RATE_WINDOW_SECONDS", "60")))
-DEFAULT_LIMIT = max(1, int(os.getenv("REELO_RATE_LIMIT", "120")))
-
+DEFAULT_LIMIT = max(1, int(os.getenv("REELO_RATE_LIMIT", os.getenv("REELO_RATE_LIMIT_PER_MINUTE", "120"))))
 _lock = Lock()
 _hits = defaultdict(deque)
 
 
-def rate_limit(key: str, limit: int = DEFAULT_LIMIT, window: int = WINDOW_SECONDS) -> tuple[bool, int]:
-    """Return (allowed, retry_after_seconds) using a sliding-window counter."""
+def _local_rate_limit(key: str, limit: int, window: int) -> tuple[bool, int]:
     now = monotonic()
-    bucket = _hits[key]
     with _lock:
+        bucket = _hits[key]
         while bucket and now - bucket[0] >= window:
             bucket.popleft()
         if len(bucket) >= limit:
-            retry = max(1, int(window - (now - bucket[0])))
-            return False, retry
+            return False, max(1, int(window - (now - bucket[0])))
         bucket.append(now)
     return True, 0
+
+
+def rate_limit(key: str, limit: int = DEFAULT_LIMIT, window: int = WINDOW_SECONDS) -> tuple[bool, int]:
+    """Use Redis when available, with a safe local fallback."""
+    try:
+        from redis_backend import get_redis
+        client = get_redis()
+        if client is not None:
+            bucket = f"reelo:ratelimit:{key}:{int(monotonic() // window)}"
+            count = client.incr(bucket)
+            if count == 1:
+                client.expire(bucket, max(1, window))
+            if count > limit:
+                return False, max(1, window - int(monotonic() % window))
+            return True, 0
+    except Exception:
+        pass
+    return _local_rate_limit(key, limit, window)
 
 
 def redis_configured() -> bool:
@@ -48,5 +61,5 @@ def infrastructure_status() -> dict:
         "redis": redis_configured(),
         "object_storage": object_storage_configured(),
         "cdn": cdn_configured(),
-        "rate_limiter": "process-local",
+        "rate_limiter": "redis-distributed" if redis_configured() else "process-local",
     }
