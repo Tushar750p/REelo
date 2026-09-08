@@ -41,6 +41,7 @@ from notifications_v2_api import router as notifications_v2_router
 from video_processing import start_video_worker
 from security import install_security
 from enforcement import install_enforcement
+from production_hardening import router as system_router, install_rate_limit
 from payout_state import normalize_state, can_transition
 
 app.router.routes[:] = [route for route in app.router.routes if not (getattr(route, "path", None) == "/api/feed" and "GET" in getattr(route, "methods", set()))]
@@ -59,7 +60,7 @@ def personalized_feed(limit:int=20,following:bool=False,mode:str|None=None,autho
     result=legacy_feed(limit=limit,following=True,mode="following",authorization=authorization) if following else recommendations(limit=limit,authorization=authorization)
     return filter_blocked(result,authorization)
 
-app.include_router(recommendation_router);app.include_router(recommendation_feedback_router);app.include_router(profile_router);app.include_router(messaging_router);app.include_router(stories_router);app.include_router(remix_router);app.include_router(sounds_router);app.include_router(editor_router);app.include_router(drafts_router);app.include_router(live_router);app.include_router(live_v2_router);app.include_router(live_ws_router);app.include_router(livekit_router);app.include_router(live_guests_router);app.include_router(live_moderation_router);app.include_router(live_gifts_router);app.include_router(coins_router);app.include_router(payments_router);app.include_router(trending_router);app.include_router(topics_router);app.include_router(smart_search_router);app.include_router(moderation_router);app.include_router(creator_router);app.include_router(creator_analytics_router);app.include_router(creator_growth_router);app.include_router(creator_experiments_router);app.include_router(monetization_router);app.include_router(payouts_router);app.include_router(admin_payouts_router);app.include_router(admin_moderation_router);app.include_router(community_actions_router);app.include_router(creator_verification_router);app.include_router(admin_creator_verification_router);app.include_router(trust_safety_router);app.include_router(kyc_router);app.include_router(saves_router);app.include_router(privacy_router);app.include_router(notifications_v2_router)
+app.include_router(recommendation_router);app.include_router(recommendation_feedback_router);app.include_router(profile_router);app.include_router(messaging_router);app.include_router(stories_router);app.include_router(remix_router);app.include_router(sounds_router);app.include_router(editor_router);app.include_router(drafts_router);app.include_router(live_router);app.include_router(live_v2_router);app.include_router(live_ws_router);app.include_router(livekit_router);app.include_router(live_guests_router);app.include_router(live_moderation_router);app.include_router(live_gifts_router);app.include_router(coins_router);app.include_router(payments_router);app.include_router(trending_router);app.include_router(topics_router);app.include_router(smart_search_router);app.include_router(moderation_router);app.include_router(creator_router);app.include_router(creator_analytics_router);app.include_router(creator_growth_router);app.include_router(creator_experiments_router);app.include_router(monetization_router);app.include_router(payouts_router);app.include_router(admin_payouts_router);app.include_router(admin_moderation_router);app.include_router(community_actions_router);app.include_router(creator_verification_router);app.include_router(admin_creator_verification_router);app.include_router(trust_safety_router);app.include_router(kyc_router);app.include_router(saves_router);app.include_router(privacy_router);app.include_router(notifications_v2_router);app.include_router(system_router)
 
 @app.on_event("startup")
 def start_background_workers():
@@ -67,6 +68,7 @@ def start_background_workers():
 
 install_security(app)
 install_enforcement(app)
+install_rate_limit(app)
 
 def validate_payout_transition(current:str,target:str)->str:
     current_state=normalize_state(current);target_state=normalize_state(target)
