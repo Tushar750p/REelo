@@ -31,6 +31,7 @@ from creator_verification_api import router as creator_verification_router
 from admin_creator_verification_api import router as admin_creator_verification_router
 from trust_safety_api import router as trust_safety_router
 from kyc_api import router as kyc_router
+from saves_api import router as saves_router
 from security import install_security
 from enforcement import install_enforcement
 from payout_state import normalize_state, can_transition
@@ -51,7 +52,7 @@ def personalized_feed(limit:int=20,following:bool=False,mode:str|None=None,autho
     result=legacy_feed(limit=limit,following=True,mode="following",authorization=authorization) if following else recommendations(limit=limit,authorization=authorization)
     return filter_blocked(result,authorization)
 
-app.include_router(recommendation_router);app.include_router(recommendation_feedback_router);app.include_router(profile_router);app.include_router(messaging_router);app.include_router(stories_router);app.include_router(remix_router);app.include_router(sounds_router);app.include_router(editor_router);app.include_router(drafts_router);app.include_router(live_router);app.include_router(live_ws_router);app.include_router(livekit_router);app.include_router(live_guests_router);app.include_router(live_moderation_router);app.include_router(live_gifts_router);app.include_router(coins_router);app.include_router(payments_router);app.include_router(trending_router);app.include_router(topics_router);app.include_router(smart_search_router);app.include_router(moderation_router);app.include_router(creator_router);app.include_router(monetization_router);app.include_router(payouts_router);app.include_router(admin_payouts_router);app.include_router(admin_moderation_router);app.include_router(community_actions_router);app.include_router(creator_verification_router);app.include_router(admin_creator_verification_router);app.include_router(trust_safety_router);app.include_router(kyc_router)
+app.include_router(recommendation_router);app.include_router(recommendation_feedback_router);app.include_router(profile_router);app.include_router(messaging_router);app.include_router(stories_router);app.include_router(remix_router);app.include_router(sounds_router);app.include_router(editor_router);app.include_router(drafts_router);app.include_router(live_router);app.include_router(live_ws_router);app.include_router(livekit_router);app.include_router(live_guests_router);app.include_router(live_moderation_router);app.include_router(live_gifts_router);app.include_router(coins_router);app.include_router(payments_router);app.include_router(trending_router);app.include_router(topics_router);app.include_router(smart_search_router);app.include_router(moderation_router);app.include_router(creator_router);app.include_router(monetization_router);app.include_router(payouts_router);app.include_router(admin_payouts_router);app.include_router(admin_moderation_router);app.include_router(community_actions_router);app.include_router(creator_verification_router);app.include_router(admin_creator_verification_router);app.include_router(trust_safety_router);app.include_router(kyc_router);app.include_router(saves_router)
 install_security(app)
 install_enforcement(app)
 
