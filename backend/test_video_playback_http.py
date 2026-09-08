@@ -6,6 +6,13 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from fastapi.testclient import TestClient
+
+# Import the production application during test collection, before any other
+# test can build Starlette's middleware stack around the shared app instance.
+from app import app
+from main import MEDIA, db, hash_password, init_db
+from video_processing import VIDEO_PROFILES, ensure_tables, process_video
 
 pytestmark = pytest.mark.integration
 
@@ -17,11 +24,6 @@ def test_playback_metadata_http_returns_hls_and_variants():
         pytest.fail("FFmpeg and ffprobe must be installed for playback integration tests")
 
     os.environ.setdefault("REELO_DATABASE_URL", "postgresql://reelo:reelo_test_password@localhost:5432/reelo_test")
-    from fastapi.testclient import TestClient
-    from main import MEDIA, db, hash_password, init_db
-    from app import app
-    from video_processing import VIDEO_PROFILES, ensure_tables, process_video
-
     init_db()
     video_id = uuid4().hex
     user_id = uuid4().hex
