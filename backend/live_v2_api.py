@@ -7,6 +7,12 @@ from main import current_user, db
 
 router = APIRouter(prefix="/api/live/v2", tags=["live-v2"])
 REPLAY_STATUSES = {"recording", "processing", "ready", "failed"}
+REPLAY_TRANSITIONS = {
+    "recording": {"processing", "failed"},
+    "processing": {"ready", "failed"},
+    "ready": set(),
+    "failed": {"processing"},
+}
 
 
 def uid_from(auth):
@@ -129,6 +135,8 @@ def start_replay(room_id: str, authorization: str | None = Header(default=None))
         room = c.execute("SELECT user_id,status FROM live_rooms WHERE id=?", (room_id,)).fetchone()
         if not room or str(room[0]) != str(uid):
             raise HTTPException(403, "Only the LIVE host can start recording")
+        if room[1] != "live":
+            raise HTTPException(409, "Replay recording can only start while LIVE is active")
         existing = c.execute("SELECT id,status FROM live_replays WHERE room_id=? AND status IN ('recording','processing') ORDER BY created_at DESC LIMIT 1", (room_id,)).fetchone()
         if existing:
             return {"replay_id": existing[0], "status": existing[1]}
@@ -149,6 +157,9 @@ def update_replay_status(room_id: str, replay_id: str, data: ReplayStatusIn, aut
     with db() as c:
         ensure_tables(c)
         row = host_replay(c, room_id, uid, replay_id)
+        current = str(row[4])
+        if status != current and status not in REPLAY_TRANSITIONS.get(current, set()):
+            raise HTTPException(409, f"Invalid replay transition: {current} -> {status}")
         t = now()
         ended = t if status in {"ready", "failed"} else row[7]
         media = data.media_url.strip() if data.media_url is not None else row[3]
