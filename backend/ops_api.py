@@ -4,6 +4,7 @@ import os
 
 from production_infra import infrastructure_status
 from database_config import database_status
+from database_gateway import pool_status
 
 router = APIRouter(prefix="/api/ops", tags=["operations"])
 
@@ -12,11 +13,13 @@ router = APIRouter(prefix="/api/ops", tags=["operations"])
 def ops_health():
     infra = infrastructure_status()
     db = database_status()
+    pool = pool_status()
     return {
         "status": "ok",
         "service": "reelo",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "infrastructure": infra,
         "database": db,
+        "pool": pool,
         "environment": os.getenv("REELO_ENV", "development"),
     }
