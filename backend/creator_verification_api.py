@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from uuid import uuid4
 from datetime import datetime, timezone
 from main import db, current_user
+from notifications import ensure_notifications_table
 
 router=APIRouter(prefix='/api/creator/verification',tags=['creator-verification'])
 class VerifyRequest(BaseModel): legal_name:str; country:str='IN'
@@ -17,7 +18,12 @@ def get_verification(authorization:str|None=Header(default=None)):
     u=uid(authorization)
     with db() as c:
         tables(c); r=c.execute('SELECT id,legal_name,country,status,created_at,updated_at FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
-    return {'status':r['status'] if r else 'not_started','verification':dict(r) if r else None}
+        result={'status':r['status'] if r else 'not_started','verification':dict(r) if r else None}
+        if r:
+            ensure_notifications_table(c)
+            n=c.execute("SELECT id,type,read,created_at FROM notifications WHERE recipient_id=? AND type LIKE 'verification_%' ORDER BY created_at DESC LIMIT 10",(u,)).fetchall()
+            result['notifications']=[dict(x) for x in n]
+    return result
 @router.post('')
 def submit(data:VerifyRequest,authorization:str|None=Header(default=None)):
     u=uid(authorization); name=data.legal_name.strip(); country=data.country.strip().upper()
@@ -28,4 +34,6 @@ def submit(data:VerifyRequest,authorization:str|None=Header(default=None)):
         tables(c); old=c.execute('SELECT status FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
         if old and old['status']=='approved': return {'ok':True,'status':'approved'}
         c.execute("INSERT INTO creator_verifications(id,user_id,legal_name,country,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET legal_name=excluded.legal_name,country=excluded.country,status='pending',updated_at=excluded.updated_at",(vid,u,name,country,'pending',t,t))
+        ensure_notifications_table(c)
+        c.execute("INSERT INTO notifications(id,recipient_id,actor_id,type,video_id) VALUES(?,?,?,?,?)",(uuid4().hex,u,u,'verification_submitted',None))
     return {'ok':True,'status':'pending','note':'Verification is queued for admin review.'}
