@@ -1,12 +1,7 @@
-"""PostgreSQL integration checks for the core persistence schema.
-
-The test is skipped unless REELO_DATABASE_URL points at PostgreSQL, allowing
-it to remain safe for the existing SQLite developer workflow.
-"""
+"""PostgreSQL integration checks for the core persistence schema."""
 import os
 
 import pytest
-
 
 pytestmark = pytest.mark.integration
 
@@ -24,22 +19,12 @@ def pg_connection():
 
 
 def test_core_tables_exist(pg_connection):
-    expected = {
-        "users",
-        "videos",
-        "likes",
-        "follows",
-        "comments",
-        "events",
-        "notifications",
-    }
+    expected = {"users", "videos", "likes", "follows", "comments", "events", "notifications"}
     with pg_connection.cursor() as cur:
         cur.execute(
             """
-            SELECT table_name
-            FROM information_schema.tables
-            WHERE table_schema = current_schema()
-              AND table_name = ANY(%s)
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = current_schema() AND table_name = ANY(%s)
             """,
             (list(expected),),
         )
@@ -51,23 +36,20 @@ def test_core_constraints_and_round_trip(pg_connection):
     with pg_connection.transaction():
         with pg_connection.cursor() as cur:
             cur.execute(
-                "INSERT INTO users (id, username, email) VALUES (%s, %s, %s)",
-                ("pg-test-user", "pg_test_user", "pg-test@example.invalid"),
+                "INSERT INTO users (id, username, password_hash, display_name) VALUES (%s, %s, %s, %s)",
+                ("pg-test-user", "pg_test_user", "not-a-real-password", "PG Test User"),
             )
             cur.execute(
-                "INSERT INTO users (id, username, email) VALUES (%s, %s, %s)",
-                ("pg-test-user-2", "pg_test_user_2", "pg-test-2@example.invalid"),
+                "INSERT INTO users (id, username, password_hash, display_name) VALUES (%s, %s, %s, %s)",
+                ("pg-test-user-2", "pg_test_user_2", "not-a-real-password", "PG Test User 2"),
             )
             cur.execute(
-                "INSERT INTO videos (id, user_id, caption) VALUES (%s, %s, %s)",
-                ("pg-test-video", "pg-test-user", "PostgreSQL integration test"),
+                "INSERT INTO videos (id, user_id, filename, caption) VALUES (%s, %s, %s, %s)",
+                ("pg-test-video", "pg-test-user", "test.mp4", "PostgreSQL integration test"),
             )
+            cur.execute("INSERT INTO likes (user_id, video_id) VALUES (%s, %s)", ("pg-test-user", "pg-test-video"))
             cur.execute(
-                "INSERT INTO likes (user_id, video_id) VALUES (%s, %s)",
-                ("pg-test-user", "pg-test-video"),
-            )
-            cur.execute(
-                "INSERT INTO comments (id, user_id, video_id, text) VALUES (%s, %s, %s, %s)",
+                "INSERT INTO comments (id, user_id, video_id, body) VALUES (%s, %s, %s, %s)",
                 ("pg-test-comment", "pg-test-user", "pg-test-video", "Works"),
             )
             cur.execute(
@@ -75,17 +57,15 @@ def test_core_constraints_and_round_trip(pg_connection):
                 ("pg-test-user", "pg-test-user-2"),
             )
             cur.execute(
-                "INSERT INTO events (user_id, video_id, event_type, value) VALUES (%s, %s, %s, %s)",
-                ("pg-test-user", "pg-test-video", "view", 1.0),
+                "INSERT INTO events (id, user_id, video_id, action, seconds) VALUES (%s, %s, %s, %s, %s)",
+                ("pg-test-event", "pg-test-user", "pg-test-video", "view", 1.0),
             )
             cur.execute(
-                "INSERT INTO notifications (id, user_id, actor_id, type, payload) VALUES (%s, %s, %s, %s, %s)",
-                ("pg-test-notification", "pg-test-user-2", "pg-test-user", "follow", "{}"),
+                "INSERT INTO notifications (id, recipient_id, actor_id, type, video_id) VALUES (%s, %s, %s, %s, %s)",
+                ("pg-test-notification", "pg-test-user-2", "pg-test-user", "follow", None),
             )
-
             cur.execute(
                 "SELECT v.caption, u.username FROM videos v JOIN users u ON u.id = v.user_id WHERE v.id = %s",
                 ("pg-test-video",),
             )
-            row = cur.fetchone()
-            assert row == ("PostgreSQL integration test", "pg_test_user")
+            assert cur.fetchone() == ("PostgreSQL integration test", "pg_test_user")
