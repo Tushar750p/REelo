@@ -1,5 +1,6 @@
 """HTTP-level smoke coverage for REelo core endpoints on PostgreSQL."""
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -44,13 +45,28 @@ def test_core_http_flow(client):
     assert me.status_code == 200
     assert me.json()["user"]["username"] == username_a
 
-    video_id = f"http-{suffix}"
-    from database_gateway import db
-    with db() as conn:
-        conn.execute(
-            "INSERT INTO videos(id,user_id,filename,caption,status) VALUES(?,?,?,?,?)",
-            (video_id, user_a, "http-test.mp4", "HTTP PostgreSQL test", "ready"),
-        )
+    # Exercise the real multipart upload path instead of inserting a video directly.
+    upload = client.post(
+        "/api/videos/upload",
+        files={"file": ("http-test.mp4", b"REelo PostgreSQL HTTP upload test", "video/mp4")},
+        data={"caption": "HTTP PostgreSQL upload test"},
+        headers={"Authorization": f"Bearer {token_a}"},
+    )
+    assert upload.status_code == 200, upload.text
+    uploaded = upload.json()
+    video_id = uploaded["id"]
+    filename = uploaded["filename"]
+    assert uploaded["status"] == "uploaded"
+    assert uploaded["mime_type"] == "video/mp4"
+    assert uploaded["size"] > 0
+    assert uploaded["url"] == f"/media/{filename}"
+
+    media_path = Path(__file__).parent / "media" / filename
+    assert media_path.is_file()
+
+    media = client.get(uploaded["url"])
+    assert media.status_code == 200
+    assert media.content == b"REelo PostgreSQL HTTP upload test"
 
     feed = client.get("/api/feed", headers={"Authorization": f"Bearer {token_b}"})
     assert feed.status_code == 200
@@ -83,3 +99,5 @@ def test_core_http_flow(client):
     )
     assert notifications.status_code == 200
     assert notifications.json()["unread"] >= 1
+
+    media_path.unlink(missing_ok=True)
