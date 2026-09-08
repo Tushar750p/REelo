@@ -3,6 +3,12 @@ from fastapi.responses import JSONResponse
 from automated_moderation import moderate_text
 
 
+def _moderation_value(result, key, default=None):
+    if isinstance(result, dict):
+        return result.get(key, default)
+    return getattr(result, key, default)
+
+
 def install_safety_guard(app):
     @app.middleware("http")
     async def safety_guard(request: Request, call_next):
@@ -32,15 +38,16 @@ def install_safety_guard(app):
 
             if text:
                 result = moderate_text(text)
-                if result.get("action") in {"review", "limit"}:
+                action = _moderation_value(result, "action", "allow")
+                if action in {"review", "limit"}:
                     return JSONResponse(
                         status_code=400,
                         content={
                             "detail": "Content blocked by safety checks",
                             "safety": {
-                                "action": result.get("action"),
-                                "score": result.get("score", 0),
-                                "labels": result.get("labels", []),
+                                "action": action,
+                                "score": _moderation_value(result, "score", 0),
+                                "labels": list(_moderation_value(result, "labels", [])),
                             },
                         },
                     )
