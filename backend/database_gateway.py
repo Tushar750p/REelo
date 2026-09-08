@@ -1,8 +1,8 @@
 """Backend-neutral DB gateway for REelo's core API.
 
 SQLite remains the default. Set REELO_DATABASE_URL to a PostgreSQL DSN to run
-core main.py persistence on PostgreSQL. SQL placeholder conversion and a small
-SQLite-compatibility surface keep the existing feature APIs portable.
+core persistence on PostgreSQL. Existing feature APIs can keep their SQLite-style
+parameter markers and common compatibility SQL while migrating incrementally.
 """
 import os
 import re
@@ -13,10 +13,6 @@ from pathlib import Path
 class _PGResult:
     def __init__(self, cursor):
         self._cursor = cursor
-
-    @property
-    def rowcount(self):
-        return self._cursor.rowcount
 
     def fetchone(self):
         row = self._cursor.fetchone()
@@ -29,6 +25,10 @@ class _PGResult:
 
     def __iter__(self):
         return iter(self.fetchall())
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
 
 
 class _Row(dict):
@@ -45,37 +45,47 @@ class _PGConnection:
 
     @staticmethod
     def _sql(sql: str) -> str:
-        # Keep existing SQLite-style parameters working on psycopg.
+        # Preserve the existing API's SQLite-style parameter markers.
         sql = sql.replace("?", "%s")
-        # SQLite supports MAX(a,b) as a scalar clamp; PostgreSQL calls this
-        # GREATEST(a,b). Only rewrite the two-argument scalar form.
-        sql = re.sub(r"\bMAX\(([^(),]+),\s*([^()]+)\)", r"GREATEST(\1, \2)", sql, flags=re.IGNORECASE)
+        # SQLite accepts MAX(a, b) as a scalar two-argument function; PostgreSQL
+        # uses GREATEST(a, b) for the equivalent expression.
+        sql = re.sub(r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)", r"GREATEST(\1, \2)", sql, flags=re.IGNORECASE)
+        # SQLite's PRAGMA table_info() is used by feature modules for additive
+        # schema checks. Translate it to information_schema with the same six
+        # positional fields those modules consume: cid, name, type, notnull,
+        # dflt_value, pk.
+        match = re.search(r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)", sql, flags=re.IGNORECASE)
+        if match:
+            table = match.group(2).replace("'", "''")
+            return (
+                "SELECT (ordinal_position - 1) AS cid, column_name AS name, "
+                "data_type AS type, CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END AS notnull, "
+                "column_default AS dflt_value, CASE WHEN EXISTS ("
+                "SELECT 1 FROM information_schema.table_constraints tc "
+                "JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name "
+                "AND kcu.table_schema=tc.table_schema AND kcu.table_name=tc.table_name "
+                "WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=current_schema() "
+                f"AND tc.table_name='{table}' AND kcu.column_name=c.column_name) THEN 1 ELSE 0 END AS pk "
+                "FROM information_schema.columns c "
+                f"WHERE table_schema=current_schema() AND table_name='{table}' "
+                "ORDER BY ordinal_position"
+            )
+        # PostgreSQL supports IF NOT EXISTS for additive columns; SQLite-style
+        # callers are intentionally left unchanged except for this safe upgrade.
+        sql = re.sub(
+            r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)",
+            r"ALTER TABLE \1 ADD COLUMN IF NOT EXISTS \2",
+            sql,
+            flags=re.IGNORECASE,
+        )
         return sql
 
     def execute(self, sql, params=()):
-        sql = sql.strip()
-        pragma = re.match(r"^PRAGMA\s+table_info\(([^)]+)\)\s*$", sql, flags=re.IGNORECASE)
         cur = self.conn.cursor()
-        if pragma:
-            table = pragma.group(1).strip().strip('"').replace('""', '"')
-            cur.execute(
-                "SELECT ordinal_position - 1, column_name, data_type, "
-                "CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END, column_default, "
-                "CASE WHEN EXISTS (SELECT 1 FROM pg_constraint pc "
-                "JOIN pg_attribute pa ON pa.attrelid=pc.conrelid AND pa.attnum=ANY(pc.conkey) "
-                "WHERE pc.contype='p' AND pc.conrelid=c.table_name::regclass "
-                "AND pa.attname=c.column_name) THEN 1 ELSE 0 END "
-                "FROM information_schema.columns c "
-                "WHERE table_schema=current_schema() AND table_name=%s "
-                "ORDER BY ordinal_position",
-                (table,),
-            )
-        else:
-            cur.execute(self._sql(sql), tuple(params or ()))
+        cur.execute(self._sql(sql), tuple(params or ()))
         return _PGResult(cur)
 
     def executescript(self, sql):
-        # REelo schema strings are semicolon-delimited DDL statements.
         for statement in re.split(r";\s*", sql):
             statement = statement.strip()
             if statement:
