@@ -18,15 +18,22 @@ def test_playback_metadata_http_returns_hls_and_variants():
 
     os.environ.setdefault("REELO_DATABASE_URL", "postgresql://reelo:reelo_test_password@localhost:5432/reelo_test")
     from fastapi.testclient import TestClient
-    from main import MEDIA, app, db, init_db
+    from main import MEDIA, app, db, hash_password, init_db
     from video_processing import VIDEO_PROFILES, ensure_tables, process_video
 
     init_db()
     video_id = uuid4().hex
+    user_id = uuid4().hex
     source = MEDIA / f"http-{video_id}.mp4"
     client = TestClient(app)
 
     try:
+        with db() as c:
+            c.execute(
+                "INSERT INTO users(id,username,password_hash,display_name) VALUES(?,?,?,?)",
+                (user_id, f"ci_{user_id[:12]}", hash_password("ci-password"), "CI Playback User"),
+            )
+
         generated = subprocess.run(
             [
                 ffmpeg, "-y", "-f", "lavfi", "-i", "testsrc=size=320x568:rate=12",
@@ -40,7 +47,7 @@ def test_playback_metadata_http_returns_hls_and_variants():
             ensure_tables(c)
             c.execute(
                 "INSERT INTO videos(id,user_id,filename,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?)",
-                (video_id, "demo-user", source.name, "HTTP adaptive playback test", source.stat().st_size, "video/mp4", "processing"),
+                (video_id, user_id, source.name, "HTTP adaptive playback test", source.stat().st_size, "video/mp4", "processing"),
             )
 
         processed = process_video(video_id, source)
@@ -89,3 +96,4 @@ def test_playback_metadata_http_returns_hls_and_variants():
             for table in ("video_hls", "video_variants", "video_processing"):
                 c.execute(f"DELETE FROM {table} WHERE video_id=?", (video_id,))
             c.execute("DELETE FROM videos WHERE id=?", (video_id,))
+            c.execute("DELETE FROM users WHERE id=?", (user_id,))
