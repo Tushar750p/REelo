@@ -7,6 +7,7 @@ from uuid import uuid4
 import hashlib, hmac, os, secrets, sqlite3
 from database_gateway import db
 from automated_moderation import moderate_text
+from video_processing import enqueue_video
 
 ROOT=Path(__file__).parent
 MEDIA=ROOT/"media"
@@ -120,7 +121,12 @@ async def upload_video(file:UploadFile=File(...),caption:str=Form(""),authorizat
     if not total:dest.unlink(missing_ok=True);raise HTTPException(400,"Empty video file")
     vid=uuid4().hex
     with db() as c:c.execute("INSERT INTO videos(id,user_id,filename,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?)",(vid,uid,name,caption,total,mime,"ready"))
-    return {"id":vid,"status":"uploaded","filename":name,"size":total,"mime_type":mime,"url":f"/media/{name}"}
+    try:
+        enqueue_video(vid)
+    except Exception:
+        with db() as c:c.execute("UPDATE videos SET status='ready' WHERE id=?",(vid,))
+        raise HTTPException(503,"Video uploaded but processing could not be queued")
+    return {"id":vid,"status":"processing","filename":name,"size":total,"mime_type":mime,"url":f"/media/{name}"}
 @app.post("/api/videos/{video_id}/like")
 def like(video_id:str,authorization:str|None=Header(default=None)):
     uid=current_user(authorization)
@@ -186,19 +192,14 @@ def notifications(limit:int=50,offset:int=0,authorization:str|None=Header(defaul
 def mark_all_notifications_read(authorization:str|None=Header(default=None)):
     uid=current_user(authorization)
     if not uid:raise HTTPException(401,"Login required")
-    with db() as c:c.execute("UPDATE notifications SET read=1 WHERE recipient_id=? AND read=0",(uid,))
-    return {"updated":True,"unread":0}
-@app.post("/api/notifications/{notification_id}/read")
-def mark_notification_read(notification_id:str,authorization:str|None=Header(default=None)):
+    with db() as c:c.execute("UPDATE notifications SET read=1 WHERE recipient_id=?",(uid,))
+    return {"ok":True}
+@app.post("/api/events")
+def event(video_id:str,action:str,seconds:float=0,authorization:str|None=Header(default=None)):
     uid=current_user(authorization)
     if not uid:raise HTTPException(401,"Login required")
     with db() as c:
-        cur=c.execute("UPDATE notifications SET read=1 WHERE id=? AND recipient_id=?",(notification_id,uid))
-        if cur.rowcount==0:raise HTTPException(404,"Notification not found")
-    return {"updated":True}
-@app.post("/api/events/watch")
-def watch(video_id:str,seconds:float=0,action:str="view",authorization:str|None=Header(default=None)):
-    with db() as c:
-        c.execute("INSERT INTO events(id,user_id,video_id,action,seconds) VALUES(?,?,?,?,?)",(uuid4().hex,current_user(authorization) or "anonymous",video_id,action,max(0,seconds)))
-        if action=="view":c.execute("UPDATE videos SET views=views+1 WHERE id=?",(video_id,))
-    return {"accepted":True}
+        if not c.execute("SELECT 1 FROM videos WHERE id=?",(video_id,)).fetchone():raise HTTPException(404,"Video not found")
+        c.execute("INSERT INTO events(id,user_id,video_id,action,seconds) VALUES(?,?,?,?,?)",(uuid4().hex,uid,video_id,action,max(0,float(seconds))))
+        if action in {"view","watch_start"}:c.execute("UPDATE videos SET views=views+1 WHERE id=?",(video_id,))
+    return {"ok":True}
