@@ -17,14 +17,21 @@ def test_ffmpeg_pipeline_generates_thumbnail_variants_and_hls():
         pytest.fail("FFmpeg and ffprobe must be installed for media pipeline tests")
 
     os.environ.setdefault("REELO_DATABASE_URL", "postgresql://reelo:reelo_test_password@localhost:5432/reelo_test")
-    from main import MEDIA, db, init_db
+    from main import MEDIA, db, hash_password, init_db
     from video_processing import process_video, ensure_tables, VIDEO_PROFILES
 
     init_db()
     video_id = uuid4().hex
+    user_id = uuid4().hex
     source = MEDIA / f"ci-{video_id}.mp4"
 
     try:
+        with db() as c:
+            c.execute(
+                "INSERT INTO users(id,username,password_hash,display_name) VALUES(?,?,?,?)",
+                (user_id, f"ci_{user_id[:12]}", hash_password("ci-password"), "CI Media User"),
+            )
+
         result = subprocess.run(
             [ffmpeg, "-y", "-f", "lavfi", "-i", "testsrc=size=240x320:rate=12", "-t", "2", "-pix_fmt", "yuv420p", "-c:v", "libx264", str(source)],
             capture_output=True, text=True, timeout=120,
@@ -35,7 +42,7 @@ def test_ffmpeg_pipeline_generates_thumbnail_variants_and_hls():
             ensure_tables(c)
             c.execute(
                 "INSERT INTO videos(id,user_id,filename,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?)",
-                (video_id, "demo-user", source.name, "CI media test", source.stat().st_size, "video/mp4", "processing"),
+                (video_id, user_id, source.name, "CI media test", source.stat().st_size, "video/mp4", "processing"),
             )
 
         processed = process_video(video_id, source)
@@ -72,3 +79,9 @@ def test_ffmpeg_pipeline_generates_thumbnail_variants_and_hls():
         hls_dir = MEDIA / "hls" / video_id
         if hls_dir.exists():
             shutil.rmtree(hls_dir)
+        with db() as c:
+            c.execute("DELETE FROM video_hls WHERE video_id=?", (video_id,))
+            c.execute("DELETE FROM video_variants WHERE video_id=?", (video_id,))
+            c.execute("DELETE FROM video_processing WHERE video_id=?", (video_id,))
+            c.execute("DELETE FROM videos WHERE id=?", (video_id,))
+            c.execute("DELETE FROM users WHERE id=?", (user_id,))
