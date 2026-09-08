@@ -11,6 +11,7 @@ from sounds_api import router as sounds_router
 from editor_api import router as editor_router
 from drafts_api import router as drafts_router
 from live_api import router as live_router
+from live_ws import router as live_ws_router
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
@@ -50,6 +51,7 @@ app.include_router(sounds_router)
 app.include_router(editor_router)
 app.include_router(drafts_router)
 app.include_router(live_router)
+app.include_router(live_ws_router)
 app.include_router(trending_router)
 app.include_router(topics_router)
 app.include_router(smart_search_router)
