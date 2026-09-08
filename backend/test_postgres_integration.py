@@ -55,6 +55,10 @@ def test_core_constraints_and_round_trip(pg_connection):
                 ("pg-test-user", "pg_test_user", "pg-test@example.invalid"),
             )
             cur.execute(
+                "INSERT INTO users (id, username, email) VALUES (%s, %s, %s)",
+                ("pg-test-user-2", "pg_test_user_2", "pg-test-2@example.invalid"),
+            )
+            cur.execute(
                 "INSERT INTO videos (id, user_id, caption) VALUES (%s, %s, %s)",
                 ("pg-test-video", "pg-test-user", "PostgreSQL integration test"),
             )
@@ -70,3 +74,18 @@ def test_core_constraints_and_round_trip(pg_connection):
                 "INSERT INTO follows (follower_id, following_id) VALUES (%s, %s)",
                 ("pg-test-user", "pg-test-user-2"),
             )
+            cur.execute(
+                "INSERT INTO events (user_id, video_id, event_type, value) VALUES (%s, %s, %s, %s)",
+                ("pg-test-user", "pg-test-video", "view", 1.0),
+            )
+            cur.execute(
+                "INSERT INTO notifications (id, user_id, actor_id, type, payload) VALUES (%s, %s, %s, %s, %s)",
+                ("pg-test-notification", "pg-test-user-2", "pg-test-user", "follow", "{}"),
+            )
+
+            cur.execute(
+                "SELECT v.caption, u.username FROM videos v JOIN users u ON u.id = v.user_id WHERE v.id = %s",
+                ("pg-test-video",),
+            )
+            row = cur.fetchone()
+            assert row == ("PostgreSQL integration test", "pg_test_user")
