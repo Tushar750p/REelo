@@ -1,8 +1,14 @@
 from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel
 from main import db, current_user
 from creator_verification_api import tables
 
 router = APIRouter(prefix='/api/admin/creator-verification', tags=['admin-creator-verification'])
+
+
+class StatusRequest(BaseModel):
+    status: str
+    reason: str = ''
 
 
 def require_admin(authorization):
@@ -16,6 +22,13 @@ def require_admin(authorization):
     return uid
 
 
+def ensure_review_tables(c):
+    c.execute('''CREATE TABLE IF NOT EXISTS creator_verification_reviews(
+        id TEXT PRIMARY KEY, verification_id TEXT NOT NULL, admin_user_id TEXT NOT NULL,
+        previous_status TEXT NOT NULL, status TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL)''')
+
+
 @router.get('')
 def list_verifications(status: str = 'pending', limit: int = 100, authorization: str | None = Header(default=None)):
     require_admin(authorization)
@@ -25,23 +38,48 @@ def list_verifications(status: str = 'pending', limit: int = 100, authorization:
     limit = max(1, min(limit, 200))
     with db() as c:
         tables(c)
-        if status == 'all':
-            rows = c.execute('SELECT id,user_id,legal_name,country,status,created_at,updated_at FROM creator_verifications ORDER BY updated_at DESC LIMIT ?', (limit,)).fetchall()
-        else:
-            rows = c.execute('SELECT id,user_id,legal_name,country,status,created_at,updated_at FROM creator_verifications WHERE status=? ORDER BY updated_at DESC LIMIT ?', (status, limit)).fetchall()
+        ensure_review_tables(c)
+        query = 'SELECT id,user_id,legal_name,country,status,created_at,updated_at FROM creator_verifications'
+        args = []
+        if status != 'all':
+            query += ' WHERE status=?'
+            args.append(status)
+        query += ' ORDER BY updated_at DESC LIMIT ?'
+        args.append(limit)
+        rows = c.execute(query, tuple(args)).fetchall()
+    return {'items': [dict(r) for r in rows]}
+
+
+@router.get('/{verification_id}/history')
+def review_history(verification_id: str, authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    with db() as c:
+        tables(c)
+        ensure_review_tables(c)
+        row = c.execute('SELECT id FROM creator_verifications WHERE id=?', (verification_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, 'Verification request not found')
+        rows = c.execute('SELECT id,admin_user_id,previous_status,status,reason,created_at FROM creator_verification_reviews WHERE verification_id=? ORDER BY created_at DESC', (verification_id,)).fetchall()
     return {'items': [dict(r) for r in rows]}
 
 
 @router.post('/{verification_id}/status')
-def update_verification(verification_id: str, status: str, authorization: str | None = Header(default=None)):
-    require_admin(authorization)
-    target = status.strip().lower()
+def update_verification(verification_id: str, body: StatusRequest, authorization: str | None = Header(default=None)):
+    admin_id = require_admin(authorization)
+    target = body.status.strip().lower()
+    reason = body.reason.strip()
     if target not in {'pending', 'approved', 'rejected'}:
         raise HTTPException(400, 'Invalid verification status')
+    if len(reason) > 500:
+        raise HTTPException(400, 'Reason is too long')
+    if target == 'rejected' and len(reason) < 3:
+        raise HTTPException(400, 'A rejection reason is required')
     from datetime import datetime, timezone
+    from uuid import uuid4
     now = datetime.now(timezone.utc).isoformat()
     with db() as c:
         tables(c)
+        ensure_review_tables(c)
         row = c.execute('SELECT id,status FROM creator_verifications WHERE id=?', (verification_id,)).fetchone()
         if not row:
             raise HTTPException(404, 'Verification request not found')
@@ -49,4 +87,5 @@ def update_verification(verification_id: str, status: str, authorization: str | 
         if current == 'approved' and target != 'approved':
             raise HTTPException(409, 'Approved verification cannot be changed here')
         c.execute('UPDATE creator_verifications SET status=?,updated_at=? WHERE id=?', (target, now, verification_id))
-    return {'ok': True, 'id': verification_id, 'previous_status': current, 'status': target}
+        c.execute('INSERT INTO creator_verification_reviews(id,verification_id,admin_user_id,previous_status,status,reason,created_at) VALUES(?,?,?,?,?,?,?)', (str(uuid4()), verification_id, admin_id, current, target, reason, now))
+    return {'ok': True, 'id': verification_id, 'previous_status': current, 'status': target, 'reason': reason}
