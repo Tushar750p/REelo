@@ -62,6 +62,10 @@ jobs:
         working-directory: backend
         run: python postgres_verify.py
 
+      - name: Run PostgreSQL integration tests
+        working-directory: backend
+        run: pytest -q test_postgres_integration.py test_postgres_api.py
+
       - name: Run isolated smoke tests
         working-directory: backend
         run: pytest -q test_smoke.py
