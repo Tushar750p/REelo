@@ -1,39 +1,41 @@
 -- REelo PostgreSQL core schema migration 001.
--- Idempotent: safe to apply to a fresh PostgreSQL database.
+-- Mirrors the current core API contract so PostgreSQL can replace SQLite
+-- without changing endpoint-level column names.
 
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    username TEXT NOT NULL UNIQUE,
-    email TEXT,
-    password_hash TEXT,
-    bio TEXT,
-    avatar_url TEXT,
-    is_private INTEGER NOT NULL DEFAULT 0,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    bio TEXT DEFAULT '',
+    followers BIGINT NOT NULL DEFAULT 0,
+    following BIGINT NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS videos (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    filename TEXT,
-    caption TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    filename TEXT NOT NULL,
+    caption TEXT DEFAULT '',
+    likes BIGINT NOT NULL DEFAULT 0,
+    comments BIGINT NOT NULL DEFAULT 0,
     views BIGINT NOT NULL DEFAULT 0,
-    likes_count BIGINT NOT NULL DEFAULT 0,
-    comments_count BIGINT NOT NULL DEFAULT 0
+    file_size BIGINT NOT NULL DEFAULT 0,
+    mime_type TEXT DEFAULT '',
+    status TEXT DEFAULT 'ready',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS likes (
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, video_id)
 );
 
 CREATE TABLE IF NOT EXISTS follows (
     follower_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     following_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (follower_id, following_id),
     CHECK (follower_id <> following_id)
 );
@@ -42,26 +44,26 @@ CREATE TABLE IF NOT EXISTS comments (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     video_id TEXT NOT NULL REFERENCES videos(id) ON DELETE CASCADE,
-    text TEXT NOT NULL,
+    body TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS events (
-    id BIGSERIAL PRIMARY KEY,
+    id TEXT PRIMARY KEY,
     user_id TEXT,
     video_id TEXT,
-    event_type TEXT NOT NULL,
-    value DOUBLE PRECISION,
+    action TEXT NOT NULL,
+    seconds DOUBLE PRECISION NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
     id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    actor_id TEXT,
+    recipient_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    actor_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     type TEXT NOT NULL,
-    payload TEXT,
-    read_at TIMESTAMPTZ,
+    video_id TEXT REFERENCES videos(id) ON DELETE CASCADE,
+    read INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -71,4 +73,4 @@ CREATE INDEX IF NOT EXISTS idx_likes_video ON likes(video_id);
 CREATE INDEX IF NOT EXISTS idx_follows_following ON follows(following_id);
 CREATE INDEX IF NOT EXISTS idx_comments_video_created ON comments(video_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_events_user_created ON events(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created ON notifications(recipient_id, created_at DESC);
