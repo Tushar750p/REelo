@@ -1,21 +1,23 @@
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 from uuid import uuid4
 from datetime import datetime, timezone
-import os
+import os, json, time, hmac, hashlib, urllib.request
 from main import db, current_user
 from notifications import ensure_notifications_table
 
 router=APIRouter(prefix='/api/creator/verification',tags=['creator-verification'])
 class VerifyRequest(BaseModel): legal_name:str; country:str='IN'
-class KycStartRequest(BaseModel): provider:str='stripe_identity'
+class KycStartRequest(BaseModel): provider:str='persona'
+
+PERSONA_API='https://api.withpersona.com/api/v1'
 
 def tables(c):
     c.execute("CREATE TABLE IF NOT EXISTS creator_verifications(id TEXT PRIMARY KEY,user_id TEXT UNIQUE NOT NULL,legal_name TEXT NOT NULL,country TEXT NOT NULL DEFAULT 'IN',status TEXT NOT NULL DEFAULT 'pending',created_at TEXT NOT NULL,updated_at TEXT NOT NULL)")
-    # KYC metadata only: REelo never stores identity-document images or document numbers.
     cols={r[1] for r in c.execute('PRAGMA table_info(creator_verifications)').fetchall()}
     for name,typ,default in [('kyc_status','TEXT','not_started'),('kyc_provider','TEXT',''),('kyc_reference','TEXT','')]:
         if name not in cols: c.execute(f"ALTER TABLE creator_verifications ADD COLUMN {name} {typ} DEFAULT '{default}'")
+    c.execute("CREATE TABLE IF NOT EXISTS kyc_webhook_events(event_id TEXT PRIMARY KEY,provider TEXT NOT NULL,event_name TEXT NOT NULL,created_at TEXT NOT NULL)")
 
 def review_tables(c): c.execute("CREATE TABLE IF NOT EXISTS creator_verification_reviews(id TEXT PRIMARY KEY,verification_id TEXT NOT NULL,admin_id TEXT NOT NULL,status TEXT NOT NULL,reason TEXT DEFAULT '',created_at TEXT NOT NULL)")
 def uid(auth):
@@ -27,6 +29,29 @@ def now(): return datetime.now(timezone.utc).isoformat()
 def notification(c,u,typ):
     ensure_notifications_table(c)
     c.execute("INSERT INTO notifications(id,recipient_id,actor_id,type,video_id) VALUES(?,?,?,?,?)",(uuid4().hex,u,u,typ,None))
+
+def persona_request(method,path,payload=None):
+    key=os.getenv('PERSONA_API_KEY','').strip()
+    if not key: raise HTTPException(503,'Persona KYC is not configured')
+    body=json.dumps(payload).encode() if payload is not None else None
+    req=urllib.request.Request(PERSONA_API+path,data=body,method=method,headers={'Authorization':'Bearer '+key,'Content-Type':'application/json','Persona-Version':os.getenv('PERSONA_VERSION','2025-12-08')})
+    try:
+        with urllib.request.urlopen(req,timeout=12) as r: return json.loads(r.read().decode())
+    except Exception as e:
+        code=getattr(e,'code',502)
+        raise HTTPException(502,f'Persona request failed ({code})')
+
+def persona_signature_valid(raw:bytes,header:str,secret:str):
+    if not header or not secret: return False
+    parts={}
+    for item in header.split(','):
+        if '=' in item:
+            k,v=item.split('=',1); parts.setdefault(k.strip(),[]).append(v.strip())
+    ts=(parts.get('t') or [''])[0]
+    if not ts or not ts.isdigit(): return False
+    if abs(int(time.time())-int(ts))>300: return False
+    expected=hmac.new(secret.encode(),(ts+'.').encode()+raw,hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(expected,v) for v in parts.get('v1',[]))
 
 @router.get('')
 def get_verification(authorization:str|None=Header(default=None)):
@@ -59,22 +84,60 @@ def submit(data:VerifyRequest,authorization:str|None=Header(default=None)):
 @router.post('/kyc/start')
 def start_kyc(data:KycStartRequest,authorization:str|None=Header(default=None)):
     u=uid(authorization); provider=data.provider.strip().lower()
-    if provider not in {'stripe_identity','persona'}: raise HTTPException(400,'Unsupported KYC provider')
-    if not os.getenv('REELO_KYC_PROVIDER_KEY'):
-        raise HTTPException(503,'KYC provider is not configured. Add REELO_KYC_PROVIDER_KEY before enabling live identity verification.')
+    if provider!='persona': raise HTTPException(400,'Only Persona KYC is enabled')
+    template=os.getenv('PERSONA_INQUIRY_TEMPLATE_ID','').strip()
+    if not os.getenv('PERSONA_API_KEY','').strip() or not template:
+        raise HTTPException(503,'Persona KYC is not configured. Add PERSONA_API_KEY and PERSONA_INQUIRY_TEMPLATE_ID.')
     with db() as c:
-        tables(c); r=c.execute('SELECT id,status FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
+        tables(c); r=c.execute('SELECT id,status,kyc_status,kyc_reference FROM creator_verifications WHERE user_id=?',(u,)).fetchone()
         if not r: raise HTTPException(400,'Submit creator verification details first')
         if r['status']=='approved': return {'ok':True,'status':'approved'}
-        ref='kyc_'+uuid4().hex
-        c.execute("UPDATE creator_verifications SET kyc_status='started',kyc_provider=?,kyc_reference=?,updated_at=? WHERE user_id=?",(provider,ref,now(),u))
+        if r['kyc_status']=='verified': return {'ok':True,'status':'verified','reference':r['kyc_reference']}
+        reference='reelo_'+u
+    payload={'data':{'attributes':{'inquiry-template-id':template,'reference-id':reference}}}
+    result=persona_request('POST','/inquiries',payload)
+    pdata=result.get('data') or {}; meta=result.get('meta') or {}; inquiry_id=pdata.get('id'); status=(pdata.get('attributes') or {}).get('status','pending')
+    link=meta.get('one-time-link') or meta.get('one-time-link-short')
+    if not inquiry_id: raise HTTPException(502,'Persona returned no inquiry ID')
+    with db() as c:
+        tables(c)
+        c.execute("UPDATE creator_verifications SET kyc_status=?,kyc_provider='persona',kyc_reference=?,updated_at=? WHERE user_id=?",('started',inquiry_id,now(),u))
         notification(c,u,'verification_kyc_started')
-    # Provider-specific session creation belongs here. No identity documents are stored by REelo.
-    return {'ok':True,'status':'started','provider':provider,'reference':ref,'integration':'provider_session_required'}
+    return {'ok':True,'status':'started','provider':'persona','reference':inquiry_id,'inquiry_id':inquiry_id,'status_from_provider':status,'verification_url':link}
 
 @router.post('/kyc/webhook')
-def kyc_webhook(authorization:str|None=Header(default=None)):
-    # Provider webhooks must be authenticated by the provider signature before deployment.
-    if authorization != os.getenv('REELO_KYC_WEBHOOK_TOKEN'):
-        raise HTTPException(401,'Invalid KYC webhook authorization')
-    return {'ok':True,'note':'Provider webhook endpoint reserved for signed KYC status events.'}
+async def kyc_webhook(request:Request,persona_signature:str|None=Header(default=None,alias='Persona-Signature')):
+    secret=os.getenv('PERSONA_WEBHOOK_SECRET','').strip()
+    raw=await request.body()
+    if not persona_signature_valid(raw,persona_signature or '',secret):
+        raise HTTPException(401,'Invalid Persona webhook signature')
+    try: body=json.loads(raw.decode())
+    except Exception: raise HTTPException(400,'Invalid JSON')
+    event=body.get('data') or {}; event_id=event.get('id'); attrs=event.get('attributes') or {}; event_name=attrs.get('name','')
+    payload=attrs.get('payload') or {}; pdata=payload.get('data') or {}; p_attrs=pdata.get('attributes') or {}
+    inquiry_id=pdata.get('id'); status=p_attrs.get('status')
+    if not event_id or not inquiry_id: return {'ok':True,'ignored':True}
+    with db() as c:
+        tables(c)
+        exists=c.execute('SELECT 1 FROM kyc_webhook_events WHERE event_id=?',(event_id,)).fetchone()
+        if exists: return {'ok':True,'duplicate':True}
+        c.execute('INSERT INTO kyc_webhook_events(event_id,provider,event_name,created_at) VALUES(?,?,?,?)',(event_id,'persona',event_name,now()))
+        row=c.execute('SELECT user_id FROM creator_verifications WHERE kyc_provider=? AND kyc_reference=?',('persona',inquiry_id)).fetchone()
+        if not row: return {'ok':True,'ignored':True}
+        u=row['user_id']
+        if event_name=='inquiry.approved' or status=='approved':
+            new='verified'; note='verification_kyc_verified'
+        elif event_name in {'inquiry.declined','inquiry.failed'} or status in {'declined','failed'}:
+            new='failed'; note='verification_kyc_failed'
+        elif event_name=='inquiry.expired' or status=='expired':
+            new='expired'; note='verification_kyc_expired'
+        elif event_name=='inquiry.marked-for-review' or status=='needs_review':
+            new='review'; note='verification_kyc_review'
+        elif event_name in {'inquiry.started','inquiry.completed'} or status in {'pending','completed'}:
+            new='started'; note=None
+        else:
+            new=None; note=None
+        if new:
+            c.execute('UPDATE creator_verifications SET kyc_status=?,updated_at=? WHERE user_id=?', (new,now(),u))
+            if note: notification(c,u,note)
+    return {'ok':True,'event':event_name,'status':status}
