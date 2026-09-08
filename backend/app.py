@@ -6,6 +6,7 @@ from recommendation_feedback_api import router as recommendation_feedback_router
 from profile_api import router as profile_router
 from messaging_api import router as messaging_router
 from stories_api import router as stories_router
+from remix_api import router as remix_router
 from moderation_api import router as moderation_router
 from creator_api import router as creator_router
 from monetization_api import router as monetization_router
@@ -26,23 +27,16 @@ app.router.routes[:] = [
 
 def filter_blocked(result, authorization):
     uid = current_user(authorization)
-    if not uid or not isinstance(result, dict) or not isinstance(result.get("items"), list):
-        return result
-    with db() as c:
-        blocked = blocked_ids(c, uid)
-    if not blocked:
-        return result
+    if not uid or not isinstance(result, dict) or not isinstance(result.get("items"), list): return result
+    with db() as c: blocked = blocked_ids(c, uid)
+    if not blocked: return result
     result["items"] = [item for item in result["items"] if str(item.get("user_id", "")) not in blocked]
     return result
 
 @app.get("/api/feed")
 def personalized_feed(limit: int = 20, following: bool = False, mode: str | None = None, authorization: str | None = Header(default=None)):
-    if mode is not None:
-        following = mode.strip().lower() == "following"
-    if following:
-        result = legacy_feed(limit=limit, following=True, mode="following", authorization=authorization)
-    else:
-        result = recommendations(limit=limit, authorization=authorization)
+    if mode is not None: following = mode.strip().lower() == "following"
+    result = legacy_feed(limit=limit, following=True, mode="following", authorization=authorization) if following else recommendations(limit=limit, authorization=authorization)
     return filter_blocked(result, authorization)
 
 app.include_router(recommendation_router)
@@ -50,6 +44,7 @@ app.include_router(recommendation_feedback_router)
 app.include_router(profile_router)
 app.include_router(messaging_router)
 app.include_router(stories_router)
+app.include_router(remix_router)
 app.include_router(trending_router)
 app.include_router(topics_router)
 app.include_router(smart_search_router)
@@ -63,8 +58,6 @@ app.include_router(community_actions_router)
 install_security(app)
 
 def validate_payout_transition(current: str, target: str) -> str:
-    current_state = normalize_state(current)
-    target_state = normalize_state(target)
-    if not can_transition(current_state, target_state):
-        raise HTTPException(409, f"Invalid payout transition: {current_state} -> {target_state}")
+    current_state = normalize_state(current); target_state = normalize_state(target)
+    if not can_transition(current_state, target_state): raise HTTPException(409, f"Invalid payout transition: {current_state} -> {target_state}")
     return target_state
