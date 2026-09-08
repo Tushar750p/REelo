@@ -42,7 +42,7 @@ def recommendations(limit: int = 20, offset: int = 0, authorization: str | None 
         WHERE v.status='ready' AND v.user_id<>? AND NOT EXISTS(SELECT 1 FROM blocked_users b WHERE b.blocker_id=? AND b.blocked_id=v.user_id)
         AND NOT EXISTS(SELECT 1 FROM events ni WHERE ni.user_id=? AND ni.video_id=v.id AND ni.action='not_interested' AND ni.created_at>=datetime('now','-90 days'))
         AND NOT EXISTS(SELECT 1 FROM events mc JOIN videos mv ON mv.id=mc.video_id WHERE mc.user_id=? AND mc.action='mute_creator' AND mv.user_id=v.user_id AND mc.created_at>=datetime('now','-90 days'))
-        ORDER BY v.created_at DESC LIMIT 500""", (uid,uid,uid,uid,uid,uid,uid,uid,uid,uid,uid)).fetchall()
+        ORDER BY v.created_at DESC LIMIT 500""", (uid,uid,uid,uid,uid,uid,uid,uid,uid,uid,uid,uid)).fetchall()
         history = c.execute("SELECT v.*,e.action,CASE WHEN e.action IN ('watch','complete','like','comment','share','save') THEN 1 WHEN e.action IN ('not_interested','skip','dismiss','mute_creator') THEN -1 ELSE 0 END signal FROM events e JOIN videos v ON v.id=e.video_id WHERE e.user_id=? AND e.created_at>=datetime('now','-30 days') ORDER BY e.created_at DESC LIMIT 500", (uid,)).fetchall()
     topic_profile={}
     for row in history:
