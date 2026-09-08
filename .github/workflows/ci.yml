@@ -16,6 +16,24 @@ jobs:
   backend:
     name: Backend validation
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: reelo_test
+          POSTGRES_USER: reelo
+          POSTGRES_PASSWORD: reelo_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reelo -d reelo_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      REELO_DATABASE_URL: postgresql://reelo:reelo_test_password@localhost:5432/reelo_test
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,6 +53,14 @@ jobs:
       - name: Compile backend
         working-directory: backend
         run: python -m compileall -q .
+
+      - name: Apply PostgreSQL migrations
+        working-directory: backend
+        run: python run_migrations.py
+
+      - name: Verify PostgreSQL schema
+        working-directory: backend
+        run: python postgres_verify.py
 
       - name: Run isolated smoke tests
         working-directory: backend
