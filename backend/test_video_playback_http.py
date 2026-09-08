@@ -18,7 +18,8 @@ def test_playback_metadata_http_returns_hls_and_variants():
 
     os.environ.setdefault("REELO_DATABASE_URL", "postgresql://reelo:reelo_test_password@localhost:5432/reelo_test")
     from fastapi.testclient import TestClient
-    from main import MEDIA, app, db, hash_password, init_db
+    from main import MEDIA, db, hash_password, init_db
+    from app import app
     from video_processing import VIDEO_PROFILES, ensure_tables, process_video
 
     init_db()
