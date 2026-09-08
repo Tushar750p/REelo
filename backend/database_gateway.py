@@ -75,6 +75,12 @@ class _PGConnection:
             sql,
             flags=re.IGNORECASE,
         )
+        sql = re.sub(
+            r"datetime\(\s*'now'\s*,\s*'(-?\d+)\s+(seconds?|minutes?|hours?|days?|weeks?)'\s*\)",
+            lambda m: "CURRENT_TIMESTAMP - INTERVAL '%s %s'" % (m.group(1), m.group(2)),
+            sql,
+            flags=re.IGNORECASE,
+        )
         match = re.search(
             r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)",
             sql,
