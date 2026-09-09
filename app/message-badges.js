@@ -39,17 +39,20 @@
     addInboxButton();
     if (!token()) return;
     try {
-      const [nr, mr] = await Promise.all([
+      const [nr, mr, rr] = await Promise.all([
         fetch(API + '/api/notifications/summary', { headers: headers() }),
-        fetch(API + '/api/messages/unread/summary', { headers: headers() })
+        fetch(API + '/api/messages/unread/summary', { headers: headers() }),
+        fetch(API + '/api/message-requests/summary', { headers: headers() })
       ]);
       const nd = nr.ok ? await nr.json() : {};
       const md = mr.ok ? await mr.json() : {};
+      const rd = rr.ok ? await rr.json() : {};
       const activity = [...document.querySelectorAll('.bottom button')].find(b => (b.textContent || '').trim().toLowerCase().startsWith('activity'));
       const inbox = document.querySelector('[data-reelo-inbox]');
+      const totalMessages = (Number(md.total_unread) || 0) + (Number(rd.incoming) || 0);
       setBadge(activity, 'activity', nd.unread || 0);
-      setBadge(inbox, 'messages', md.total_unread || 0);
-      document.querySelectorAll('#message').forEach(b => setBadge(b, 'profile-message', md.total_unread || 0));
+      setBadge(inbox, 'messages', totalMessages);
+      document.querySelectorAll('#message').forEach(b => setBadge(b, 'profile-message', totalMessages));
     } catch (_) {}
   }
 
