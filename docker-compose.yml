@@ -68,14 +68,17 @@ services:
 
   livekit:
     image: livekit/livekit-server:latest
-    command: --config /etc/livekit.yaml
+    command:
+      - sh
+      - -c
+      - >-
+        sed -e "s|__REELO_LIVEKIT_KEY__|$${LIVEKIT_API_KEY}|g"
+        -e "s|__REELO_LIVEKIT_SECRET__|$${LIVEKIT_API_SECRET}|g"
+        /etc/livekit.yaml > /tmp/livekit.yaml
+        && livekit-server --config /tmp/livekit.yaml
     environment:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
-      LIVEKIT_TURN_ENABLED: ${LIVEKIT_TURN_ENABLED:-false}
-      LIVEKIT_TURN_DOMAIN: ${LIVEKIT_TURN_DOMAIN:-}
-      LIVEKIT_TURN_TLS_PORT: ${LIVEKIT_TURN_TLS_PORT:-5349}
-      LIVEKIT_TURN_UDP_PORT: ${LIVEKIT_TURN_UDP_PORT:-3478}
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
     ports:
@@ -83,8 +86,6 @@ services:
       - "7881:7881"
       - "7882:7882/udp"
       - "50000-50020:50000-50020/udp"
-      - "3478:3478/udp"
-      - "5349:5349/tcp"
     depends_on:
       redis:
         condition: service_healthy
