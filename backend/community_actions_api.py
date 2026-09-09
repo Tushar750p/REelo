@@ -24,6 +24,20 @@ def is_admin(uid):
     return uid in allowed
 
 
+@router.get("/comments/{comment_id}")
+def get_comment(comment_id: str, authorization: str | None = Header(default=None)):
+    """Return one comment so moderation actions do not depend on the first 100 comments."""
+    require_user(authorization)
+    with db() as c:
+        row = c.execute(
+            "SELECT c.id,c.body,c.created_at,u.id user_id,u.username,u.display_name FROM comments c JOIN users u ON u.id=c.user_id WHERE c.id=?",
+            (comment_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(404, "Comment not found")
+    return dict(row)
+
+
 @router.delete("/comments/{comment_id}")
 def delete_comment(comment_id: str, authorization: str | None = Header(default=None)):
     uid = require_user(authorization)
