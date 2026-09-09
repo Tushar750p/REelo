@@ -23,14 +23,12 @@
     box.innerHTML='<button class="comment-action" disabled>Loading options…</button>';
     sheet.classList.add('show');
     try{
-      const r=await fetch(API+`/api/videos/${encodeURIComponent(commentVideoId)}/comments?limit=100&offset=0`,{headers:headers()});
-      if(!r.ok)throw Error();
-      const d=await r.json();
-      const c=d.items.find(x=>String(x.id)===String(id));
-      if(!c)throw Error('Comment not found');
-      state.userId=c.user_id;state.username=c.username||'user';
-      const own=me&&String(me.id)===String(c.user_id);
-      box.innerHTML=(own?'<button class="comment-action danger" type="button" data-action="delete">Delete comment</button>':`<button class="comment-action" type="button" data-action="block">Block @${escLocal(c.username||'user')}</button>`)+ '<button class="comment-action" type="button" data-action="report">Report comment</button><button class="comment-action cancel" type="button" data-action="cancel">Cancel</button>';
+      const r=await fetch(API+`/api/community/comments/${encodeURIComponent(id)}`,{headers:headers()});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok)throw Error(d.detail||'Comment not found');
+      state.userId=d.user_id;state.username=d.username||'user';
+      const own=me&&String(me.id)===String(d.user_id);
+      box.innerHTML=(own?'<button class="comment-action danger" type="button" data-action="delete">Delete comment</button>':`<button class="comment-action" type="button" data-action="block">Block @${escLocal(d.username||'user')}</button>`)+ '<button class="comment-action" type="button" data-action="report">Report comment</button><button class="comment-action cancel" type="button" data-action="cancel">Cancel</button>';
       box.onclick=e=>{const b=e.target.closest('[data-action]');if(!b)return;const a=b.dataset.action;if(a==='delete')deleteComment();else if(a==='block')blockUser();else if(a==='report')reportComment();else closeActions()};
     }catch(e){box.innerHTML='<button class="comment-action" type="button" data-action="cancel">Comment unavailable · Close</button>'}
   }
