@@ -68,14 +68,13 @@ services:
 
   livekit:
     image: livekit/livekit-server:latest
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - sh
-      - -c
       - >-
         sed -e "s|__REELO_LIVEKIT_KEY__|$${LIVEKIT_API_KEY}|g"
         -e "s|__REELO_LIVEKIT_SECRET__|$${LIVEKIT_API_SECRET}|g"
         /etc/livekit.yaml > /tmp/livekit.yaml
-        && livekit-server --config /tmp/livekit.yaml
+        && exec livekit-server --config /tmp/livekit.yaml
     environment:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
