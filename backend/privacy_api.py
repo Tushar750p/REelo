@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
-from main import db, current_user
+from main import app, db, current_user
+from message_requests_api import router as message_requests_router
 
 router = APIRouter(prefix="/api/privacy", tags=["privacy"])
 
@@ -53,3 +54,7 @@ def security_summary(authorization: str | None = Header(default=None)):
         c.execute("CREATE TABLE IF NOT EXISTS privacy_settings(user_id TEXT PRIMARY KEY,private_account INTEGER DEFAULT 0,activity_status INTEGER DEFAULT 1,message_requests INTEGER DEFAULT 1,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)")
         session_count = 1 if c.execute("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone() else 0
     return {"sessions": session_count, "password": {"configured": True}, "two_factor": {"available": True, "enabled": False}, "session_security": "active"}
+
+# The privacy module is already mounted by backend/app.py; register requests here
+# so the new API stays backward-compatible without changing the large app bootstrap file.
+app.include_router(message_requests_router)
