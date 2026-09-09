@@ -37,6 +37,23 @@
     btn.classList.toggle('is-following',active);
   }
   function scan(){document.querySelectorAll('.video-card').forEach(paint)}
+  let syncTimer=null;
+  async function syncVisibleState(){
+    const t=token(); if(!t)return;
+    const names=new Set();
+    document.querySelectorAll('.video-card').forEach(card=>{const n=creatorName(card);if(n&&n!=='creator')names.add(n)});
+    for(const username of [...names].slice(0,12)){
+      try{
+        const r=await fetch(API+'/api/profiles/'+encodeURIComponent(username),{headers:{Authorization:'Bearer '+t}});
+        if(!r.ok)continue;
+        const d=await r.json(); const uid=d?.user?.id;
+        if(uid==null)continue;
+        if(d.followed)following.add(String(uid)); else following.delete(String(uid));
+      }catch(_){/* keep cached state when the profile request is unavailable */}
+    }
+    save(); scan();
+  }
+  function scheduleSync(){clearTimeout(syncTimer);syncTimer=setTimeout(syncVisibleState,350)}
   async function toggle(card){
     const uid=findCreator(card); if(!uid)return;
     const t=token(); if(!t){if(typeof window.openAuth==='function')window.openAuth('login');return;}
@@ -56,6 +73,7 @@
     const card=btn.closest('.video-card'); if(!card)return;
     e.preventDefault();e.stopPropagation();e.stopImmediatePropagation(); toggle(card);
   },true);
-  new MutationObserver(scan).observe(document.getElementById('feed')||document.body,{childList:true,subtree:true});
-  window.addEventListener('load',scan); setInterval(scan,1500);
+  new MutationObserver(()=>{scan();scheduleSync()}).observe(document.getElementById('feed')||document.body,{childList:true,subtree:true});
+  window.addEventListener('load',()=>{scan();scheduleSync()});
+  setInterval(scan,1500);
 })();
