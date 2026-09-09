@@ -19,6 +19,13 @@ def ensure_table(c):
     c.execute("CREATE INDEX IF NOT EXISTS idx_message_requests_recipient_status ON message_requests(recipient_id,status,created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_message_requests_requester_status ON message_requests(requester_id,status,created_at)")
 
+def ensure_message_tables(c):
+    c.execute("CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+    c.execute("CREATE TABLE IF NOT EXISTS conversation_members(conversation_id TEXT NOT NULL,user_id TEXT NOT NULL,PRIMARY KEY(conversation_id,user_id))")
+    c.execute("CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL,sender_id TEXT NOT NULL,body TEXT NOT NULL,read_at TEXT,delivered_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+    cols = {r[1] for r in c.execute("PRAGMA table_info(messages)").fetchall()}
+    if "delivered_at" not in cols: c.execute("ALTER TABLE messages ADD COLUMN delivered_at TEXT")
+
 def blocked(c,a,b):
     c.execute("CREATE TABLE IF NOT EXISTS blocked_users(blocker_id TEXT NOT NULL,blocked_id TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP,PRIMARY KEY(blocker_id,blocked_id))")
     return bool(c.execute("SELECT 1 FROM blocked_users WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?)",(a,b,b,a)).fetchone())
@@ -73,7 +80,7 @@ def accept_request(request_id:str,authorization:str|None=Header(default=None)):
         ensure_table(c); r=c.execute("SELECT * FROM message_requests WHERE id=? AND recipient_id=? AND status='pending'",(request_id,uid)).fetchone()
         if not r: raise HTTPException(404,"Message request not found")
         if blocked(c,uid,r["requester_id"]): raise HTTPException(403,"Messaging is unavailable because one of the users is blocked")
-        c.execute("CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY,created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP)"); c.execute("CREATE TABLE IF NOT EXISTS conversation_members(conversation_id TEXT NOT NULL,user_id TEXT NOT NULL,PRIMARY KEY(conversation_id,user_id))"); c.execute("CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL,sender_id TEXT NOT NULL,body TEXT NOT NULL,read_at TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP)")
+        ensure_message_tables(c)
         existing=c.execute("SELECT a.conversation_id FROM conversation_members a JOIN conversation_members b ON b.conversation_id=a.conversation_id WHERE a.user_id=? AND b.user_id=? LIMIT 1",(uid,r["requester_id"])).fetchone(); cid=existing[0] if existing else uuid4().hex
         if not existing:
             c.execute("INSERT INTO conversations(id) VALUES(?)",(cid,)); c.execute("INSERT INTO conversation_members(conversation_id,user_id) VALUES(?,?),(?,?)",(cid,uid,cid,r["requester_id"]))
