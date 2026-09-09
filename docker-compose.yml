@@ -17,8 +17,8 @@ services:
       REELO_SECRET: ${REELO_SECRET:?Set REELO_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
       LIVEKIT_URL: ${LIVEKIT_URL:-http://localhost:7880}
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkeyreelo2026}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-reelo-local-development-secret-2026}
       REELO_REDIS_URL: redis://redis:6379/0
       REELO_DATABASE_URL: ${REELO_DATABASE_URL:-postgresql://reelo:reelo@postgres:5432/reelo}
       REELO_ENV: ${REELO_ENV:-development}
@@ -63,7 +63,8 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
+      start_period: 5s
     restart: unless-stopped
 
   livekit:
@@ -76,8 +77,8 @@ services:
         /etc/livekit.yaml > /tmp/livekit.yaml
         && exec /livekit-server --config /tmp/livekit.yaml
     environment:
-      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Set LIVEKIT_API_KEY}
-      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Set LIVEKIT_API_SECRET}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkeyreelo2026}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-reelo-local-development-secret-2026}
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
     ports:
@@ -92,7 +93,8 @@ services:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:7880/ >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 12
+      retries: 18
+      start_period: 20s
     restart: unless-stopped
 
   web:
