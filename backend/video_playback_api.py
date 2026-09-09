@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 
-from main import db
+from main import db, current_user
 from video_processing import ensure_tables
 
 router = APIRouter(prefix="/api", tags=["video playback"])
@@ -60,3 +60,20 @@ def playback(filename: str):
             for row in variants
         ]
     return result
+
+
+@router.get("/videos/{video_id}/like/state")
+def like_state(video_id: str, authorization: str | None = Header(default=None)):
+    """Return the authenticated user's current like state and canonical count."""
+    uid = current_user(authorization)
+    if not uid:
+        raise HTTPException(401, "Login required")
+    with db() as c:
+        video = c.execute("SELECT likes FROM videos WHERE id=?", (video_id,)).fetchone()
+        if not video:
+            raise HTTPException(404, "Video not found")
+        liked = bool(c.execute(
+            "SELECT 1 FROM likes WHERE user_id=? AND video_id=?",
+            (uid, video_id),
+        ).fetchone())
+    return {"liked": liked, "likes": int(video["likes"] or 0)}
