@@ -77,3 +77,70 @@ jobs:
       - name: Run isolated smoke tests
         working-directory: backend
         run: pytest -q test_smoke.py
+
+  frontend:
+    name: Frontend validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Validate JavaScript syntax
+        run: |
+          set -e
+          find app -type f -name '*.js' -print0 | while IFS= read -r -d '' file; do
+            echo "Checking $file"
+            node --check "$file"
+          done
+
+      - name: Validate inline JavaScript syntax
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import subprocess
+          import tempfile
+          import sys
+
+          failed = False
+          for path in Path('app').glob('*.html'):
+              text = path.read_text(encoding='utf-8', errors='ignore')
+              for index, code in enumerate(re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>', text, flags=re.I | re.S), 1):
+                  if not code.strip():
+                      continue
+                  with tempfile.NamedTemporaryFile('w', suffix='.js', encoding='utf-8', delete=False) as f:
+                      f.write(code)
+                      temp = f.name
+                  result = subprocess.run(['node', '--check', temp], capture_output=True, text=True)
+                  Path(temp).unlink(missing_ok=True)
+                  if result.returncode:
+                      failed = True
+                      print(f'JavaScript syntax error in {path}, inline script #{index}:')
+                      print(result.stderr)
+          if failed:
+              sys.exit(1)
+          PY
+
+  infrastructure:
+    name: Infrastructure validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Compose configuration
+        env:
+          REELO_SECRET: ci-test-secret
+          POSTGRES_PASSWORD: ci-postgres-password
+        run: docker compose config -q
+
+      - name: Validate Nginx configuration
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          sudo nginx -t -c "$GITHUB_WORKSPACE/nginx.conf" -p "$GITHUB_WORKSPACE"
