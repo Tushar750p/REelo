@@ -2,6 +2,9 @@
   'use strict';
   let posting=false;
   let loadingMore=false;
+  let noMore=false;
+  let lastLoadAt=0;
+  let lastHeight=0;
   const formSelector='.comment-form';
   function formState(form,disabled){
     form.querySelectorAll('input,button').forEach(el=>el.disabled=disabled);
@@ -28,15 +31,35 @@
     if(send&&send.disabled){e.preventDefault();e.stopImmediatePropagation();}
   },true);
   const list=document.getElementById('commentList');
-  if(list){
-    list.addEventListener('scroll',function(){
-      if(loadingMore||typeof window.loadComments!=='function')return;
-      if(list.scrollTop+list.clientHeight<list.scrollHeight-180)return;
-      const total=Number(window.commentTotal||0);
-      const offset=Number(window.commentOffset||0);
-      if(total&&offset>=total)return;
-      loadingMore=true;
-      Promise.resolve(window.loadComments(false)).finally(function(){loadingMore=false;});
-    });
+  if(!list)return;
+  function canLoad(){
+    if(loadingMore||noMore||typeof window.loadComments!=='function')return false;
+    const now=Date.now();
+    if(now-lastLoadAt<1200)return false;
+    return list.scrollTop+list.clientHeight>=list.scrollHeight-180;
   }
+  function loadMore(){
+    if(!canLoad())return;
+    loadingMore=true;
+    lastLoadAt=Date.now();
+    const before=list.scrollHeight;
+    lastHeight=before;
+    Promise.resolve(window.loadComments(false)).then(function(){
+      window.setTimeout(function(){
+        const after=list.scrollHeight;
+        if(after<=before||after<=lastHeight)noMore=true;
+      },150);
+    }).catch(function(){}).finally(function(){loadingMore=false;});
+  }
+  list.addEventListener('scroll',loadMore,{passive:true});
+  const observer=new MutationObserver(function(){
+    if(list.scrollHeight>lastHeight+40)noMore=false;
+  });
+  observer.observe(list,{childList:true,subtree:true});
+  document.addEventListener('click',function(e){
+    if(e.target.closest('[onclick*="openComments"],#commentButton,.comment-trigger')){
+      noMore=false;
+      lastHeight=0;
+    }
+  },true);
 })();
