@@ -1,5 +1,5 @@
 # REelo LiveKit production-style configuration.
-# Keep real credentials in environment/secret management, never in git.
+# Credentials are injected by docker-compose at container startup.
 port: 7880
 bind_addresses:
   - 0.0.0.0
@@ -11,12 +11,9 @@ rtc:
 redis:
   address: redis:6379
 keys:
-  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
+  __REELO_LIVEKIT_KEY__: __REELO_LIVEKIT_SECRET__
 turn:
-  enabled: ${LIVEKIT_TURN_ENABLED:false}
-  domain: ${LIVEKIT_TURN_DOMAIN:}
-  tls_port: ${LIVEKIT_TURN_TLS_PORT:5349}
-  udp_port: ${LIVEKIT_TURN_UDP_PORT:3478}
+  enabled: false
 logging:
   level: info
 room:
