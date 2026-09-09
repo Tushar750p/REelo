@@ -17,11 +17,9 @@ def require_user(authorization):
     if not uid: raise HTTPException(401, "Login required")
     return uid
 
-
 def ensure_column(c, table, column, definition):
     cols = {r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in cols: c.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
 
 def ensure_tables(c):
     c.execute("CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP)")
@@ -34,32 +32,16 @@ def ensure_tables(c):
     c.execute("CREATE INDEX IF NOT EXISTS idx_members_user ON conversation_members(user_id,conversation_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_reactions_message ON message_reactions(message_id)")
 
-
 def ensure_blocks(c):
     c.execute("CREATE TABLE IF NOT EXISTS blocked_users(blocker_id TEXT NOT NULL, blocked_id TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY(blocker_id,blocked_id))")
-
 
 def is_blocked(c, a, b):
     ensure_blocks(c)
     return bool(c.execute("SELECT 1 FROM blocked_users WHERE (blocker_id=? AND blocked_id=?) OR (blocker_id=? AND blocked_id=?) LIMIT 1", (a,b,b,a)).fetchone())
 
-
-class MessageIn(BaseModel): body: str
-class ConversationUpdate(BaseModel):
-    muted: bool | None = None; archived: bool | None = None; pinned: bool | None = None
-class ReactionIn(BaseModel): reaction: str
-class TypingIn(BaseModel): typing: bool = True
-class ReportIn(BaseModel): reason: str; details: str = ""
-
-
 def conversation_for(c,uid,other_id):
     row=c.execute("SELECT a.conversation_id FROM conversation_members a JOIN conversation_members b ON b.conversation_id=a.conversation_id WHERE a.user_id=? AND b.user_id=? LIMIT 1",(uid,other_id)).fetchone()
     return row[0] if row else None
-
-
-def assert_member(c,cid,uid):
-    if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(cid,uid)).fetchone(): raise HTTPException(403,"Conversation not found")
-
 
 def message_payload(c,mid,uid):
     row=c.execute("SELECT m.id,m.body,m.sender_id,m.created_at,m.delivered_at,m.read_at,u.username,u.display_name FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.id=?",(mid,)).fetchone()
@@ -69,6 +51,11 @@ def message_payload(c,mid,uid):
     out=dict(row); out["reactions"]=[dict(r) for r in reactions]; out["my_reaction"]=mine[0] if mine else None
     return out
 
+class MessageIn(BaseModel): body: str
+class ConversationUpdate(BaseModel): muted: bool | None = None; archived: bool | None = None; pinned: bool | None = None
+class ReactionIn(BaseModel): reaction: str
+class TypingIn(BaseModel): typing: bool = True
+class ReportIn(BaseModel): reason: str; details: str = ""
 
 @router.get("")
 def conversations(limit:int=50,offset:int=0,include_archived:bool=False,authorization:str|None=Header(default=None)):
@@ -79,7 +66,6 @@ def conversations(limit:int=50,offset:int=0,include_archived:bool=False,authoriz
         total=c.execute(f"SELECT COUNT(*) FROM conversation_members cm WHERE cm.user_id=? {af}",(uid,)).fetchone()[0]
         unread=c.execute("SELECT COUNT(*) FROM messages m JOIN conversation_members cm ON cm.conversation_id=m.conversation_id AND cm.user_id=? WHERE m.sender_id<>? AND m.read_at IS NULL AND COALESCE(cm.archived,0)=0",(uid,uid)).fetchone()[0]
     return {"items":[dict(r) for r in rows],"limit":limit,"offset":offset,"has_more":offset+len(rows)<total,"total":total,"unread_count":unread,"version":"2.2"}
-
 
 @router.post("/{user_id}")
 def send_message(user_id:str,data:MessageIn,authorization:str|None=Header(default=None)):
@@ -95,17 +81,27 @@ def send_message(user_id:str,data:MessageIn,authorization:str|None=Header(defaul
         if is_blocked(c,uid,user_id): raise HTTPException(403,"Messaging is unavailable because one of the users is blocked")
         cid=conversation_for(c,uid,user_id)
         if not cid:
+            # New contacts enter the recipient's Requests unless they already have a follow relationship.
+            follows = bool(c.execute("SELECT 1 FROM follows WHERE (follower_id=? AND following_id=?) OR (follower_id=? AND following_id=?)",(uid,user_id,user_id,uid)).fetchone())
+            if not follows:
+                c.execute("CREATE TABLE IF NOT EXISTS message_requests(id TEXT PRIMARY KEY,requester_id TEXT NOT NULL,recipient_id TEXT NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'pending',created_at TEXT DEFAULT CURRENT_TIMESTAMP,updated_at TEXT DEFAULT CURRENT_TIMESTAMP,UNIQUE(requester_id,recipient_id))")
+                existing=c.execute("SELECT id,status FROM message_requests WHERE requester_id=? AND recipient_id=?",(uid,user_id)).fetchone()
+                if existing and existing["status"]=='pending': raise HTTPException(409,"Message request already pending")
+                rid=existing["id"] if existing else uuid4().hex
+                if existing: c.execute("UPDATE message_requests SET body=?,status='pending',updated_at=CURRENT_TIMESTAMP WHERE id=?",(body,rid))
+                else: c.execute("INSERT INTO message_requests(id,requester_id,recipient_id,body) VALUES(?,?,?,?)",(rid,uid,user_id,body))
+                return {"status":"request_sent","request_id":rid,"message":body}
             cid=uuid4().hex; c.execute("INSERT INTO conversations(id) VALUES(?)",(cid)); c.execute("INSERT INTO conversation_members(conversation_id,user_id) VALUES(?,?),(?,?)",(cid,uid,cid,user_id))
         mid=uuid4().hex; c.execute("INSERT INTO messages(id,conversation_id,sender_id,body,delivered_at) VALUES(?,?,?, ?,CURRENT_TIMESTAMP)",(mid,cid,uid,body)); c.execute("UPDATE conversations SET updated_at=CURRENT_TIMESTAMP WHERE id=?",(cid,))
         row=message_payload(c,mid,uid)
     return {"conversation_id":cid,"message":row,"status":"sent"}
 
-
 @router.get("/{conversation_id}/messages")
 def message_list(conversation_id:str,limit:int=50,before:str|None=None,authorization:str|None=Header(default=None)):
     uid=require_user(authorization); limit=max(1,min(limit,100))
     with db() as c:
-        ensure_tables(c); assert_member(c,conversation_id,uid)
+        ensure_tables(c); 
+        if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(conversation_id,uid)).fetchone(): raise HTTPException(403,"Conversation not found")
         other=c.execute("SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>? LIMIT 1",(conversation_id,uid)).fetchone()
         if other and is_blocked(c,uid,other[0]): return {"items":[],"limit":limit,"before":before,"has_more":False,"marked_read":0,"blocked":True,"version":"2.2"}
         params=[conversation_id]; where="m.conversation_id=?"
@@ -122,35 +118,35 @@ def message_list(conversation_id:str,limit:int=50,before:str|None=None,authoriza
     for r in reversed(rows): x=dict(r); x["reactions"]=grouped.get(r[0],[]); x["my_reaction"]=my.get(r[0]); items.append(x)
     return {"items":items,"limit":limit,"before":before,"has_more":len(rows)==limit,"marked_read":len(unread_ids),"version":"2.2"}
 
-
 @router.post("/{conversation_id}/read")
 def mark_read(conversation_id:str,authorization:str|None=Header(default=None)):
     uid=require_user(authorization)
-    with db() as c: ensure_tables(c); assert_member(c,conversation_id,uid); cur=c.execute("UPDATE messages SET read_at=CURRENT_TIMESTAMP WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL",(conversation_id,uid))
+    with db() as c:
+        ensure_tables(c)
+        if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(conversation_id,uid)).fetchone(): raise HTTPException(403,"Conversation not found")
+        cur=c.execute("UPDATE messages SET read_at=CURRENT_TIMESTAMP WHERE conversation_id=? AND sender_id<>? AND read_at IS NULL",(conversation_id,uid))
     return {"ok":True,"read_count":cur.rowcount}
-
 
 @router.post("/{conversation_id}/typing")
 def set_typing(conversation_id:str,data:TypingIn,authorization:str|None=Header(default=None)):
     uid=require_user(authorization)
-    with db() as c: ensure_tables(c); assert_member(c,conversation_id,uid)
+    with db() as c: ensure_tables(c); 
     with _typing_lock:
         if data.typing: _typing[(conversation_id,uid)]=datetime.now(timezone.utc).timestamp()
         else: _typing.pop((conversation_id,uid),None)
     return {"ok":True,"typing":data.typing}
 
-
 @router.get("/{conversation_id}/typing")
 def get_typing(conversation_id:str,authorization:str|None=Header(default=None)):
     uid=require_user(authorization)
-    with db() as c: ensure_tables(c); assert_member(c,conversation_id,uid); members=[r[0] for r in c.execute("SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>?",(conversation_id,uid)).fetchall()]
+    with db() as c:
+        ensure_tables(c); members=[r[0] for r in c.execute("SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>?",(conversation_id,uid)).fetchall()]
     now=datetime.now(timezone.utc).timestamp()
     with _typing_lock:
         active=[m for m in members if now-_typing.get((conversation_id,m),0)<4]
         for key,ts in list(_typing.items()):
             if now-ts>=4: _typing.pop(key,None)
     return {"typing":bool(active),"user_ids":active}
-
 
 @router.put("/message/{message_id}/reaction")
 def react(message_id:str,data:ReactionIn,authorization:str|None=Header(default=None)):
@@ -159,9 +155,9 @@ def react(message_id:str,data:ReactionIn,authorization:str|None=Header(default=N
     with db() as c:
         ensure_tables(c); row=c.execute("SELECT conversation_id FROM messages WHERE id=?",(message_id,)).fetchone()
         if not row: raise HTTPException(404,"Message not found")
-        assert_member(c,row[0],uid); c.execute("INSERT INTO message_reactions(message_id,user_id,reaction) VALUES(?,?,?) ON CONFLICT(message_id,user_id) DO UPDATE SET reaction=excluded.reaction,created_at=CURRENT_TIMESTAMP",(message_id,uid,reaction)); payload=message_payload(c,message_id,uid)
+        if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(row[0],uid)).fetchone(): raise HTTPException(403,"Conversation not found")
+        c.execute("INSERT INTO message_reactions(message_id,user_id,reaction) VALUES(?,?,?) ON CONFLICT(message_id,user_id) DO UPDATE SET reaction=excluded.reaction,created_at=CURRENT_TIMESTAMP",(message_id,uid,reaction)); payload=message_payload(c,message_id,uid)
     return {"ok":True,"message":payload}
-
 
 @router.delete("/message/{message_id}/reaction")
 def remove_reaction(message_id:str,authorization:str|None=Header(default=None)):
@@ -169,21 +165,22 @@ def remove_reaction(message_id:str,authorization:str|None=Header(default=None)):
     with db() as c:
         ensure_tables(c); row=c.execute("SELECT conversation_id FROM messages WHERE id=?",(message_id,)).fetchone()
         if not row: raise HTTPException(404,"Message not found")
-        assert_member(c,row[0],uid); c.execute("DELETE FROM message_reactions WHERE message_id=? AND user_id=?",(message_id,uid)); payload=message_payload(c,message_id,uid)
+        if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(row[0],uid)).fetchone(): raise HTTPException(403,"Conversation not found")
+        c.execute("DELETE FROM message_reactions WHERE message_id=? AND user_id=?",(message_id,uid)); payload=message_payload(c,message_id,uid)
     return {"ok":True,"message":payload}
-
 
 @router.patch("/{conversation_id}")
 def update_conversation(conversation_id:str,data:ConversationUpdate,authorization:str|None=Header(default=None)):
     uid=require_user(authorization)
     with db() as c:
-        ensure_tables(c); assert_member(c,conversation_id,uid); fields=[]; values=[]
+        ensure_tables(c)
+        if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(conversation_id,uid)).fetchone(): raise HTTPException(403,"Conversation not found")
+        fields=[]; values=[]
         for name,value in (("muted",data.muted),("archived",data.archived),("pinned",data.pinned)):
             if value is not None: fields.append(f"{name}=?"); values.append(int(value))
         if fields: values += [conversation_id,uid]; c.execute(f"UPDATE conversation_members SET {','.join(fields)} WHERE conversation_id=? AND user_id=?",values)
         row=c.execute("SELECT muted,archived,pinned FROM conversation_members WHERE conversation_id=? AND user_id=?",(conversation_id,uid)).fetchone()
     return {"conversation_id":conversation_id,"settings":dict(row)}
-
 
 @router.get("/unread/summary")
 def unread_summary(authorization:str|None=Header(default=None)):
@@ -191,15 +188,14 @@ def unread_summary(authorization:str|None=Header(default=None)):
     with db() as c: ensure_tables(c); row=c.execute("SELECT COUNT(*) total_unread,COUNT(DISTINCT m.conversation_id) conversations_with_unread FROM messages m JOIN conversation_members cm ON cm.conversation_id=m.conversation_id AND cm.user_id=? WHERE m.sender_id<>? AND m.read_at IS NULL AND COALESCE(cm.archived,0)=0",(uid,uid)).fetchone()
     return dict(row)
 
-
 @router.get("/{conversation_id}/safety")
 def conversation_safety(conversation_id:str,authorization:str|None=Header(default=None)):
     uid=require_user(authorization)
     with db() as c:
-        ensure_tables(c); assert_member(c,conversation_id,uid); other=c.execute("SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>? LIMIT 1",(conversation_id,uid)).fetchone()
-        blocked=bool(other and is_blocked(c,uid,other[0]))
+        ensure_tables(c)
+        if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(conversation_id,uid)).fetchone(): raise HTTPException(403,"Conversation not found")
+        other=c.execute("SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>? LIMIT 1",(conversation_id,uid)).fetchone(); blocked=bool(other and is_blocked(c,uid,other[0]))
     return {"blocked":blocked,"can_message":not blocked,"version":"1.0"}
-
 
 @router.post("/{conversation_id}/report")
 def report_conversation(conversation_id:str,data:ReportIn,authorization:str|None=Header(default=None)):
@@ -208,14 +204,12 @@ def report_conversation(conversation_id:str,data:ReportIn,authorization:str|None
     details=data.details.strip()
     if len(details)>1000: raise HTTPException(400,"Report details are too long")
     with db() as c:
-        ensure_tables(c); assert_member(c,conversation_id,uid)
+        ensure_tables(c)
+        if not c.execute("SELECT 1 FROM conversation_members WHERE conversation_id=? AND user_id=?",(conversation_id,uid)).fetchone(): raise HTTPException(403,"Conversation not found")
         other=c.execute("SELECT user_id FROM conversation_members WHERE conversation_id=? AND user_id<>? LIMIT 1",(conversation_id,uid)).fetchone()
-        if not other: raise HTTPException(404,"Conversation user not found")
+        if not other: raise HTTPException(400,"No reportable user in conversation")
         ensure_reports_table(c)
-        existing=c.execute("SELECT id FROM reports WHERE reporter_id=? AND target_type='user' AND target_id=? AND status='open' LIMIT 1",(uid,other[0])).fetchone()
-        if existing: return {"ok":True,"duplicate":True,"report_id":existing[0]}
-        report_id=create_report(c,uid,"user",other[0],reason,details)
-    return {"ok":True,"report_id":report_id,"status":"open"}
-
-
-app.include_router(router)
+        existing=c.execute("SELECT id FROM reports WHERE reporter_id=? AND target_type='user' AND target_id=? AND status IN ('open','review') LIMIT 1",(uid,other[0])).fetchone()
+        if existing: raise HTTPException(409,"You already have an open report for this user")
+        rid=create_report(c,reporter_id=uid,target_type='user',target_id=other[0],reason=reason,details=details)
+    return {"ok":True,"report_id":rid,"status":"submitted"}
