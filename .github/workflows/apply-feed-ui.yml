@@ -1,0 +1,38 @@
+name: Apply REelo Feed UI
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Apply feed stylesheet
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('app/index.html')
+          s=p.read_text(encoding='utf-8')
+          marker='reelo-feed-ui-v1'
+          if marker in s:
+              print('Feed UI already applied')
+              raise SystemExit(0)
+          css='<link id="reelo-feed-ui-v1" rel="stylesheet" href="reelo-feed.css">'
+          if '</head>' not in s:
+              raise SystemExit('index.html has no closing head tag')
+          s=s.replace('</head>',css+'</head>',1)
+          p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit UI change
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/index.html
+          git diff --cached --quiet && echo "No changes" && exit 0
+          git commit -m "Apply professional REelo feed UI"
+          git push
