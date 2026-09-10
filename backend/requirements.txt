@@ -1,7 +1,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
-pydantic==2.10.5
+pydantic==2.11.7
 livekit-api==1.0.5
 redis==5.2.1
 psycopg[binary]==3.2.13
