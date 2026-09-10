@@ -5,8 +5,10 @@ when REELO_DATABASE_URL points to PostgreSQL. The public db() context keeps the
 existing SQLite-style API while returning pooled connections safely.
 """
 import atexit
+import hashlib
 import os
 import re
+import secrets
 import sqlite3
 from pathlib import Path
 from threading import Lock
@@ -206,13 +208,37 @@ def pool_status() -> dict:
     }
 
 
+def _demo_password_hash(password="demo"):
+    salt = secrets.token_bytes(16)
+    return salt.hex() + ":" + hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 120000).hex()
+
+
+def _ensure_demo_user(conn):
+    """Keep the documented demo account available after a persistent DB deploy."""
+    try:
+        exists = conn.execute("SELECT 1 FROM users WHERE username=?", ("reelo_creator",)).fetchone()
+    except Exception:
+        return
+    if not exists:
+        conn.execute(
+            "INSERT INTO users(id,username,password_hash,display_name,bio) VALUES(?,?,?,?,?)",
+            ("demo-user", "reelo_creator", _demo_password_hash(), "REelo Creator", "Create. Watch. Connect."),
+        )
+
+
 atexit.register(close_pool)
 
 
 def db():
     if using_postgres():
-        return _PGConnection(_postgres_pool())
+        conn = _PGConnection(_postgres_pool())
+        try:
+            _ensure_demo_user(conn)
+        except Exception:
+            pass
+        return conn
     db_path = Path(__file__).parent / "reelo.db"
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+    _ensure_demo_user(conn)
     return conn
