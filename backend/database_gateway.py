@@ -71,44 +71,23 @@ class _PGConnection:
     @staticmethod
     def _sql(sql: str) -> str:
         sql = sql.replace("?", "%s")
-        sql = re.sub(
-            r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)",
-            r"GREATEST(\1, \2)",
-            sql,
-            flags=re.IGNORECASE,
-        )
-        sql = re.sub(
-            r"datetime\(\s*'now'\s*,\s*'(-?\d+)\s+(seconds?|minutes?|hours?|days?|weeks?)'\s*\)",
-            lambda m: "CURRENT_TIMESTAMP - INTERVAL '%s %s'" % (m.group(1), m.group(2)),
-            sql,
-            flags=re.IGNORECASE,
-        )
-        match = re.search(
-            r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)",
-            sql,
-            flags=re.IGNORECASE,
-        )
+        sql = re.sub(r"\bMAX\s*\(([^(),]+),\s*([^()]+)\)", r"GREATEST(\1, \2)", sql, flags=re.IGNORECASE)
+        sql = re.sub(r"datetime\(\s*'now'\s*,\s*'(-?\d+)\s+(seconds?|minutes?|hours?|days?|weeks?)'\s*\)", lambda m: "CURRENT_TIMESTAMP - INTERVAL '%s %s'" % (m.group(1), m.group(2)), sql, flags=re.IGNORECASE)
+        match = re.search(r"PRAGMA\s+table_info\s*\(\s*([\"']?)([A-Za-z0-9_]+)\1\s*\)", sql, flags=re.IGNORECASE)
         if match:
             table = match.group(2).replace("'", "''")
-            return (
-                "SELECT (ordinal_position - 1) AS cid, column_name AS name, "
-                "data_type AS type, CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END AS notnull, "
-                "column_default AS dflt_value, CASE WHEN EXISTS ("
-                "SELECT 1 FROM information_schema.table_constraints tc "
-                "JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name "
-                "AND kcu.table_schema=tc.table_schema AND kcu.table_name=tc.table_name "
-                "WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=current_schema() "
-                f"AND tc.table_name='{table}' AND kcu.column_name=c.column_name) THEN 1 ELSE 0 END AS pk "
-                "FROM information_schema.columns c "
-                f"WHERE table_schema=current_schema() AND table_name='{table}' "
-                "ORDER BY ordinal_position"
-            )
-        sql = re.sub(
-            r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)",
-            r"ALTER TABLE \1 ADD COLUMN IF NOT EXISTS \2",
-            sql,
-            flags=re.IGNORECASE,
-        )
+            return ("SELECT (ordinal_position - 1) AS cid, column_name AS name, "
+                    "data_type AS type, CASE WHEN is_nullable='NO' THEN 1 ELSE 0 END AS notnull, "
+                    "column_default AS dflt_value, CASE WHEN EXISTS ("
+                    "SELECT 1 FROM information_schema.table_constraints tc "
+                    "JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name "
+                    "AND kcu.table_schema=tc.table_schema AND kcu.table_name=tc.table_name "
+                    "WHERE tc.constraint_type='PRIMARY KEY' AND tc.table_schema=current_schema() "
+                    f"AND tc.table_name='{table}' AND kcu.column_name=c.column_name) THEN 1 ELSE 0 END AS pk "
+                    "FROM information_schema.columns c "
+                    f"WHERE table_schema=current_schema() AND table_name='{table}' "
+                    "ORDER BY ordinal_position")
+        sql = re.sub(r"ALTER\s+TABLE\s+(\w+)\s+ADD\s+COLUMN\s+(\w+)", r"ALTER TABLE \1 ADD COLUMN IF NOT EXISTS \2", sql, flags=re.IGNORECASE)
         return sql
 
     def execute(self, sql, params=()):
@@ -152,25 +131,15 @@ def _postgres_pool():
     with _POOL_LOCK:
         if _POOL is None:
             from psycopg_pool import ConnectionPool
-
             min_size = max(1, int(os.getenv("REELO_DB_POOL_MIN", "1")))
             max_size = max(min_size, int(os.getenv("REELO_DB_POOL_MAX", "10")))
             connect_timeout = int(os.getenv("REELO_DB_CONNECT_TIMEOUT", "5"))
-            _POOL = ConnectionPool(
-                conninfo=os.environ["REELO_DATABASE_URL"],
-                min_size=min_size,
-                max_size=max_size,
-                open=False,
-                timeout=float(os.getenv("REELO_DB_POOL_TIMEOUT", "5")),
-                kwargs={"connect_timeout": connect_timeout},
-                check=ConnectionPool.check_connection,
-            )
+            _POOL = ConnectionPool(conninfo=os.environ["REELO_DATABASE_URL"], min_size=min_size, max_size=max_size, open=False, timeout=float(os.getenv("REELO_DB_POOL_TIMEOUT", "5")), kwargs={"connect_timeout": connect_timeout}, check=ConnectionPool.check_connection)
             _POOL.open(wait=False)
     return _POOL
 
 
 def open_pool(wait=False):
-    """Open the PostgreSQL pool explicitly, optionally waiting for min_size."""
     if not using_postgres():
         return False
     pool = _postgres_pool()
@@ -182,7 +151,6 @@ def open_pool(wait=False):
 
 
 def close_pool():
-    """Close the PostgreSQL pool and release all idle resources."""
     global _POOL
     with _POOL_LOCK:
         if _POOL is not None:
@@ -191,21 +159,11 @@ def close_pool():
 
 
 def pool_status() -> dict:
-    """Return safe pool metrics without exposing connection credentials."""
     if not using_postgres():
         return {"enabled": False, "backend": "sqlite"}
     pool = _postgres_pool()
     stats = pool.get_stats()
-    return {
-        "enabled": True,
-        "backend": "postgresql",
-        "closed": pool.closed,
-        "pool_min": pool.min_size,
-        "pool_max": pool.max_size,
-        "pool_size": stats.get("pool_size", 0),
-        "pool_available": stats.get("pool_available", 0),
-        "requests_waiting": stats.get("requests_waiting", 0),
-    }
+    return {"enabled": True, "backend": "postgresql", "closed": pool.closed, "pool_min": pool.min_size, "pool_max": pool.max_size, "pool_size": stats.get("pool_size", 0), "pool_available": stats.get("pool_available", 0), "requests_waiting": stats.get("requests_waiting", 0)}
 
 
 def _demo_password_hash(password="demo"):
@@ -214,16 +172,14 @@ def _demo_password_hash(password="demo"):
 
 
 def _ensure_demo_user(conn):
-    """Keep the documented demo account available after a persistent DB deploy."""
+    """Create the demo account even when the persistent database already has users."""
     try:
+        conn.execute("CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,display_name TEXT NOT NULL,bio TEXT DEFAULT '',followers INTEGER DEFAULT 0,following INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP)")
         exists = conn.execute("SELECT 1 FROM users WHERE username=?", ("reelo_creator",)).fetchone()
     except Exception:
         return
     if not exists:
-        conn.execute(
-            "INSERT INTO users(id,username,password_hash,display_name,bio) VALUES(?,?,?,?,?)",
-            ("demo-user", "reelo_creator", _demo_password_hash(), "REelo Creator", "Create. Watch. Connect."),
-        )
+        conn.execute("INSERT INTO users(id,username,password_hash,display_name,bio) VALUES(?,?,?,?,?)", ("demo-user", "reelo_creator", _demo_password_hash(), "REelo Creator", "Create. Watch. Connect."))
 
 
 atexit.register(close_pool)
@@ -232,10 +188,7 @@ atexit.register(close_pool)
 def db():
     if using_postgres():
         conn = _PGConnection(_postgres_pool())
-        try:
-            _ensure_demo_user(conn)
-        except Exception:
-            pass
+        _ensure_demo_user(conn)
         return conn
     db_path = Path(__file__).parent / "reelo.db"
     conn = sqlite3.connect(db_path)
