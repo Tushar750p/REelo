@@ -1,6 +1,4 @@
-/* REelo Feed Fallback v1
-   Keeps the feed usable when the API is unavailable or returns an empty list.
-*/
+/* REelo Feed Fallback v2 - persistent media aware */
 (function(){
   'use strict';
   const API=window.REELO_API||'https://reelo-api-ko9x.onrender.com';
@@ -9,10 +7,11 @@
     {id:'demo-2',username:'futuredaily',display_name:'Future Daily',caption:'Create something people remember.',filename:'https://www.w3schools.com/html/mov_bbb.mp4',likes:8700,comments:142,views:54000}
   ];
   const esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
+  const mediaUrl=v=>{const u=v.storage_url||v.url||v.filename||'';return /^https?:\/\//i.test(u)?u:(u.startsWith('/media/')?API+u:API+'/media/'+u.replace(/^\//,''));};
   function render(items){
     const feed=document.getElementById('feed'); if(!feed||feed.querySelector('.video-card')) return;
     feed.innerHTML=items.map(v=>`<article class="video-card" data-video-id="${esc(v.id)}">
-      <video src="${esc(v.filename)}" playsinline loop muted preload="metadata"></video>
+      <video src="${esc(mediaUrl(v))}" playsinline loop muted preload="metadata"></video>
       <div class="gradient"></div>
       <div class="info"><div class="creator"><div class="avatar">${esc((v.display_name||v.username||'R')[0]).toUpperCase()}</div><span class="handle">@${esc(v.username||'reelo')}</span><button class="follow" onclick="followUser('${esc(v.username||'')}')">Follow</button></div><div class="caption">${esc(v.caption||'')}</div><div class="sound">♫ Original sound</div></div>
       <div class="actions">
