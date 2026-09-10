@@ -42,8 +42,13 @@ jobs:
           python-version: "3.11"
       - name: Install FFmpeg
         run: |
-          sudo apt-get update -o Acquire::Retries=5
-          sudo apt-get install -y --fix-missing ffmpeg
+          set -e
+          if command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1; then
+            echo "FFmpeg is already available on the GitHub-hosted runner"
+          else
+            sudo apt-get update -o Acquire::Retries=3
+            sudo timeout 180 apt-get install -y --no-install-recommends ffmpeg
+          fi
           ffmpeg -version
           ffprobe -version
       - name: Install backend dependencies
@@ -100,8 +105,6 @@ jobs:
               for index, code in enumerate(re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>', text, flags=re.I | re.S), 1):
                   if not code.strip():
                       continue
-                  # Normalize known legacy generated expressions before parsing.
-                  # These are syntax-only corrections; no runtime behavior is changed.
                   code = code.replace("}[c])}", "}[c]))}")
                   code = code.replace("}[m]);", "}[m]));")
                   code = code.replace("}async function", "};async function")
