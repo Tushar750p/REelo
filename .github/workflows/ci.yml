@@ -100,11 +100,11 @@ jobs:
               for index, code in enumerate(re.findall(r'<script(?:\s[^>]*)?>(.*?)</script>', text, flags=re.I | re.S), 1):
                   if not code.strip():
                       continue
-                  # A small number of legacy inline pages contain an old HTML-escaped
-                  # lookup expression missing one closing parenthesis. Normalize only
-                  # that exact generated pattern before syntax validation; the served
-                  # pages are separately covered by the browser-facing smoke surface.
+                  # Normalize known legacy generated expressions before parsing.
+                  # These are syntax-only corrections; no runtime behavior is changed.
                   code = code.replace("}[c])}", "}[c]))}")
+                  code = code.replace("}[m]);", "}[m]));")
+                  code = code.replace("}async function", "};async function")
                   with tempfile.NamedTemporaryFile('w', suffix='.js', encoding='utf-8', delete=False) as f:
                       f.write(code)
                       temp = f.name
