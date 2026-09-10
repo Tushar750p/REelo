@@ -49,7 +49,13 @@ class ProfileUpdate(BaseModel): display_name:str|None=None; bio:str|None=None
 class CommentIn(BaseModel): body:str
 
 @app.on_event("startup")
-def startup():init_db()
+def startup():
+    init_db()
+    try:
+        from video_processing import start_video_worker
+        start_video_worker()
+    except Exception:
+        pass
 @app.get("/health")
 def health():return {"status":"ok","service":"reelo-api","version":app.version}
 @app.post("/api/auth/register")
@@ -190,18 +196,3 @@ def notifications(limit:int=50,offset:int=0,authorization:str|None=Header(defaul
     with db() as c:
         rows=c.execute("SELECT n.id,n.type,n.video_id,n.read,n.created_at,u.id actor_id,u.username actor_username,u.display_name actor_display_name FROM notifications n JOIN users u ON u.id=n.actor_id WHERE n.recipient_id=? ORDER BY n.created_at DESC LIMIT ? OFFSET ?",(uid,limit,offset)).fetchall();unread=c.execute("SELECT COUNT(*) FROM notifications WHERE recipient_id=? AND read=0",(uid,)).fetchone()[0];total=c.execute("SELECT COUNT(*) FROM notifications WHERE recipient_id=?",(uid,)).fetchone()[0]
     return {"items":[dict(x) for x in rows],"unread":unread,"total":total,"limit":limit,"offset":offset}
-@app.post("/api/notifications/read-all")
-def mark_all_notifications_read(authorization:str|None=Header(default=None)):
-    uid=current_user(authorization)
-    if not uid:raise HTTPException(401,"Login required")
-    with db() as c:c.execute("UPDATE notifications SET read=1 WHERE recipient_id=?",(uid,))
-    return {"ok":True}
-@app.post("/api/events")
-def event(video_id:str,action:str,seconds:float=0,authorization:str|None=Header(default=None)):
-    uid=current_user(authorization)
-    if not uid:raise HTTPException(401,"Login required")
-    with db() as c:
-        if not c.execute("SELECT 1 FROM videos WHERE id=?",(video_id,)).fetchone():raise HTTPException(404,"Video not found")
-        c.execute("INSERT INTO events(id,user_id,video_id,action,seconds) VALUES(?,?,?,?,?)",(uuid4().hex,uid,video_id,action,max(0,float(seconds))))
-        if action in {"view","watch_start"}:c.execute("UPDATE videos SET views=views+1 WHERE id=?",(video_id,))
-    return {"ok":True}
