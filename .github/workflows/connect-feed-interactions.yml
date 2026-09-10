@@ -1,0 +1,40 @@
+name: Connect REelo feed interactions
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  connect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Connect interaction script
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('app/index.html')
+          text = p.read_text(encoding='utf-8')
+          tag = '<script src="reelo-feed.js"></script>'
+          if tag not in text:
+              text = text.replace('</body>', tag + '</body>', 1)
+              p.write_text(text, encoding='utf-8')
+          else:
+              print('Interaction script already connected.')
+
+      - name: Commit connection
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet; then
+            echo 'No changes to commit.'
+          else
+            git add app/index.html
+            git commit -m 'Connect REelo feed interaction script'
+            git push
+          fi
