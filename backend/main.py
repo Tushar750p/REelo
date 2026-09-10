@@ -7,6 +7,7 @@ from uuid import uuid4
 import hashlib, hmac, os, secrets, sqlite3
 from database_gateway import db
 from automated_moderation import moderate_text
+from saved_routes import router as saved_router
 
 ROOT=Path(__file__).parent
 MEDIA=ROOT/"media"
@@ -15,6 +16,7 @@ SECRET=os.getenv("REELO_SECRET","change-this-in-production").encode()
 MAX_VIDEO_BYTES=100*1024*1024
 app=FastAPI(title="REelo API",version="0.7.0")
 app.add_middleware(CORSMiddleware,allow_origins=os.getenv("CORS_ORIGINS","*").split(","),allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
+app.include_router(saved_router)
 app.mount("/media",StaticFiles(directory=MEDIA),name="media")
 
 def hash_password(p):
