@@ -23,6 +23,7 @@ jobs:
           tags = [
               '<script src="reelo-feed.js"></script>',
               '<script src="reelo-save.js"></script>',
+              '<script src="reelo-feed-fallback.js"></script>',
           ]
           changed = False
           for tag in tags:
@@ -42,6 +43,6 @@ jobs:
             echo 'No changes to commit.'
           else
             git add app/index.html
-            git commit -m 'Connect REelo save interaction script'
+            git commit -m 'Connect REelo feed fallback script'
             git push
           fi
