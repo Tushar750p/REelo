@@ -14,18 +14,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Connect interaction script
+      - name: Connect interaction scripts
         shell: python
         run: |
           from pathlib import Path
           p = Path('app/index.html')
           text = p.read_text(encoding='utf-8')
-          tag = '<script src="reelo-feed.js"></script>'
-          if tag not in text:
-              text = text.replace('</body>', tag + '</body>', 1)
+          tags = [
+              '<script src="reelo-feed.js"></script>',
+              '<script src="reelo-save.js"></script>',
+          ]
+          changed = False
+          for tag in tags:
+              if tag not in text:
+                  text = text.replace('</body>', tag + '</body>', 1)
+                  changed = True
+          if changed:
               p.write_text(text, encoding='utf-8')
           else:
-              print('Interaction script already connected.')
+              print('Interaction scripts already connected.')
 
       - name: Commit connection
         run: |
@@ -35,6 +42,6 @@ jobs:
             echo 'No changes to commit.'
           else
             git add app/index.html
-            git commit -m 'Connect REelo feed interaction script'
+            git commit -m 'Connect REelo save interaction script'
             git push
           fi
