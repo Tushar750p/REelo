@@ -4,5 +4,5 @@ python-multipart==0.0.20
 pydantic==2.10.5
 livekit-api==1.0.5
 redis==5.2.1
-psycopg[binary]==3.2.3
+psycopg[binary]==3.2.13
 psycopg-pool==3.2.6
