@@ -8,6 +8,7 @@ import hashlib, hmac, os, secrets, sqlite3
 from database_gateway import db
 from automated_moderation import moderate_text
 from saved_routes import router as saved_router
+from storage import upload_video
 
 ROOT=Path(__file__).parent
 MEDIA=ROOT/"media"
@@ -41,8 +42,13 @@ def enforce_text(text,content_type):
 
 def init_db():
     with db() as c:
-        c.executescript("""CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,display_name TEXT NOT NULL,bio TEXT DEFAULT '',followers INTEGER DEFAULT 0,following INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS videos(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,filename TEXT NOT NULL,caption TEXT DEFAULT '',likes INTEGER DEFAULT 0,comments INTEGER DEFAULT 0,views INTEGER DEFAULT 0,file_size INTEGER DEFAULT 0,mime_type TEXT DEFAULT '',status TEXT DEFAULT 'ready',created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS likes(user_id TEXT,video_id TEXT,PRIMARY KEY(user_id,video_id));CREATE TABLE IF NOT EXISTS follows(follower_id TEXT,following_id TEXT,PRIMARY KEY(follower_id,following_id));CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY,user_id TEXT,video_id TEXT,body TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,user_id TEXT,video_id TEXT,action TEXT,seconds REAL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY,recipient_id TEXT NOT NULL,actor_id TEXT NOT NULL,type TEXT NOT NULL,video_id TEXT,read INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);""")
+        c.executescript("""CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,display_name TEXT NOT NULL,bio TEXT DEFAULT '',followers INTEGER DEFAULT 0,following INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS videos(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,filename TEXT NOT NULL,caption TEXT DEFAULT '',likes INTEGER DEFAULT 0,comments INTEGER DEFAULT 0,views INTEGER DEFAULT 0,file_size INTEGER DEFAULT 0,mime_type TEXT DEFAULT '',status TEXT DEFAULT 'ready',storage_url TEXT DEFAULT '',created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS likes(user_id TEXT,video_id TEXT,PRIMARY KEY(user_id,video_id));CREATE TABLE IF NOT EXISTS follows(follower_id TEXT,following_id TEXT,PRIMARY KEY(follower_id,following_id));CREATE TABLE IF NOT EXISTS comments(id TEXT PRIMARY KEY,user_id TEXT,video_id TEXT,body TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS events(id TEXT PRIMARY KEY,user_id TEXT,video_id TEXT,action TEXT,seconds REAL DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);CREATE TABLE IF NOT EXISTS notifications(id TEXT PRIMARY KEY,recipient_id TEXT NOT NULL,actor_id TEXT NOT NULL,type TEXT NOT NULL,video_id TEXT,read INTEGER DEFAULT 0,created_at TEXT DEFAULT CURRENT_TIMESTAMP);""")
         if not c.execute("SELECT 1 FROM users LIMIT 1").fetchone():c.execute("INSERT INTO users(id,username,password_hash,display_name,bio) VALUES(?,?,?,?,?)",("demo-user","reelo_creator",hash_password("demo"),"REelo Creator","Create. Watch. Connect."))
+        try:
+            c.execute("ALTER TABLE videos ADD COLUMN storage_url TEXT DEFAULT ''")
+        except Exception:
+            pass
+
 
 class Credentials(BaseModel): username:str; password:str; display_name:str|None=None
 class ProfileUpdate(BaseModel): display_name:str|None=None; bio:str|None=None
@@ -127,14 +133,20 @@ async def upload_video(file:UploadFile=File(...),caption:str=Form(""),authorizat
     except Exception:dest.unlink(missing_ok=True);raise
     if not total:dest.unlink(missing_ok=True);raise HTTPException(400,"Empty video file")
     vid=uuid4().hex
-    with db() as c:c.execute("INSERT INTO videos(id,user_id,filename,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?)",(vid,uid,name,caption,total,mime,"ready"))
+    storage_url=None
+    try:
+        storage_url=upload_video(dest,vid)
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(502,f"Persistent video storage upload failed: {exc}")
+    with db() as c:c.execute("INSERT INTO videos(id,user_id,filename,storage_url,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?,?)",(vid,uid,name,storage_url or "",caption,total,mime,"ready"))
     try:
         from video_processing import enqueue_video
         enqueue_video(vid)
     except Exception:
         with db() as c:c.execute("UPDATE videos SET status='ready' WHERE id=?",(vid,))
         raise HTTPException(503,"Video uploaded but processing could not be queued")
-    return {"id":vid,"status":"processing","filename":name,"size":total,"mime_type":mime,"url":f"/media/{name}"}
+    return {"id":vid,"status":"processing","filename":name,"storage_url":storage_url or "","size":total,"mime_type":mime,"url":storage_url or f"/media/{name}"}
 @app.post("/api/videos/{video_id}/like")
 def like(video_id:str,authorization:str|None=Header(default=None)):
     uid=current_user(authorization)
