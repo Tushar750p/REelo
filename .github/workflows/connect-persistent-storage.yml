@@ -1,0 +1,61 @@
+name: Connect persistent video storage
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/main.py'
+      - 'backend/storage.py'
+      - 'backend/requirements.txt'
+      - '.github/workflows/connect-persistent-storage.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch upload route for persistent storage
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('backend/main.py')
+          s = p.read_text(encoding='utf-8')
+          changed = False
+
+          if 'from storage import upload_video' not in s:
+              s = s.replace('from saved_routes import router as saved_router', 'from saved_routes import router as saved_router\nfrom storage import upload_video')
+              changed = True
+
+          if 'storage_url TEXT DEFAULT' not in s:
+              s = s.replace("status TEXT DEFAULT 'ready',created_at", "status TEXT DEFAULT 'ready',storage_url TEXT DEFAULT '',created_at")
+              changed = True
+              marker = "        try:\n            c.execute(\"ALTER TABLE videos ADD COLUMN storage_url TEXT DEFAULT ''\")\n        except Exception:\n            pass\n"
+              anchor = "        if not c.execute(\"SELECT 1 FROM users LIMIT 1\").fetchone():c.execute(\"INSERT INTO users(id,username,password_hash,display_name,bio) VALUES(?,?,?,?,?)\",(\"demo-user\",\"reelo_creator\",hash_password(\"demo\"),\"REelo Creator\",\"Create. Watch. Connect.\"))"
+              if marker not in s:
+                  s = s.replace(anchor, anchor + '\n' + marker)
+
+          old = "    vid=uuid4().hex\n    with db() as c:c.execute(\"INSERT INTO videos(id,user_id,filename,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?)\",(vid,uid,name,caption,total,mime,\"ready\"))"
+          new = "    vid=uuid4().hex\n    storage_url=None\n    try:\n        storage_url=upload_video(dest,vid)\n    except Exception as exc:\n        dest.unlink(missing_ok=True)\n        raise HTTPException(502,f\"Persistent video storage upload failed: {exc}\")\n    with db() as c:c.execute(\"INSERT INTO videos(id,user_id,filename,storage_url,caption,file_size,mime_type,status) VALUES(?,?,?,?,?,?,?,?)\",(vid,uid,name,storage_url or \"\",caption,total,mime,\"ready\"))"
+          if old in s:
+              s = s.replace(old, new)
+              changed = True
+
+          old_return = '    return {"id":vid,"status":"processing","filename":name,"size":total,"mime_type":mime,"url":f"/media/{name}"}'
+          new_return = '    return {"id":vid,"status":"processing","filename":name,"storage_url":storage_url or "","size":total,"mime_type":mime,"url":storage_url or f"/media/{name}"}'
+          if old_return in s:
+              s = s.replace(old_return, new_return)
+              changed = True
+
+          if changed:
+              p.write_text(s, encoding='utf-8')
+          print('persistent storage patch:', 'updated' if changed else 'already connected')
+          PY
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add backend/main.py
+          git diff --cached --quiet || git commit -m 'Connect Cloudinary persistent video storage' && git push
