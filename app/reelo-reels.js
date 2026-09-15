@@ -1,0 +1,30 @@
+/* REelo Reels Experience v1 */
+(function(){
+'use strict';
+function init(){
+ if(document.getElementById('reelo-reels-layer'))return;
+ const feed=document.getElementById('feed');if(!feed)return;
+ const layer=document.createElement('div');layer.id='reelo-reels-layer';layer.className='reelo-reels-layer';
+ layer.innerHTML='<div class="reelo-reels-top"><button id="reelo-reels-close" aria-label="Close">←</button><b>Reels</b><button id="reelo-reels-camera" aria-label="Create reel">＋</button></div><div id="reelo-reels-stage"></div><div class="reelo-reels-hint">Swipe up or down</div>';
+ document.body.appendChild(layer);
+ const stage=layer.querySelector('#reelo-reels-stage');let cards=[],index=0;
+ function collect(){cards=[].slice.call(feed.querySelectorAll('.video-card'));}
+ function show(i){collect();if(!cards.length)return;index=Math.max(0,Math.min(cards.length-1,i));const source=cards[index],video=source.querySelector('video');if(!video)return;stage.innerHTML='';const reel=document.createElement('article');reel.className='reelo-reel-item';reel.innerHTML='<video playsinline loop muted></video><div class="reelo-reel-gradient"></div><div class="reelo-reel-meta"><b>REelo Creator</b><span>Discover this reel on REelo</span></div><div class="reelo-reel-actions"><button data-act="like">♥<small>Like</small></button><button data-act="comment">💬<small>Comment</small></button><button data-act="share">↗<small>Share</small></button><button data-act="save">🔖<small>Save</small></button></div>';
+ const v=reel.querySelector('video');v.src=video.currentSrc||video.src;v.muted=true;stage.appendChild(reel);v.play().catch(()=>{});
+ reel.querySelector('[data-act="like"]').onclick=()=>{const b=source.querySelector('.actions .act');if(typeof window.likeVideo==='function')window.likeVideo(source.dataset.id,b);reel.classList.add('liked');setTimeout(()=>reel.classList.remove('liked'),350)};
+ reel.querySelector('[data-act="comment"]').onclick=()=>{const b=source.querySelector('.actions .act');if(b)b.click()};
+ reel.querySelector('[data-act="share"]').onclick=async()=>{if(navigator.share)try{await navigator.share({title:'REelo Reel',url:location.href})}catch(e){}else if(navigator.clipboard)navigator.clipboard.writeText(location.href)};
+ reel.querySelector('[data-act="save"]').onclick=()=>{const b=source.querySelector('.actions .act:nth-child(4),.actions button:last-child');if(b)b.click()};
+ }
+ let startY=0;
+ layer.addEventListener('touchstart',e=>{startY=e.touches[0].clientY},{passive:true});layer.addEventListener('touchend',e=>{const dy=e.changedTouches[0].clientY-startY;if(Math.abs(dy)>45)show(index+(dy<0?1:-1))},{passive:true});
+ layer.addEventListener('wheel',e=>{if(Math.abs(e.deltaY)>25){e.preventDefault();show(index+(e.deltaY>0?1:-1))}},{passive:false});
+ document.addEventListener('keydown',e=>{if(!layer.classList.contains('show'))return;if(e.key==='ArrowDown'||e.key==='ArrowRight')show(index+1);if(e.key==='ArrowUp'||e.key==='ArrowLeft')show(index-1);if(e.key==='Escape')close()});
+ function open(){collect();if(cards.length){layer.classList.add('show');document.body.classList.add('reelo-reels-open');show(0)}}function close(){layer.classList.remove('show');document.body.classList.remove('reelo-reels-open');stage.innerHTML=''}
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-reelo-open-reels]');if(b){e.preventDefault();open()}});layer.querySelector('#reelo-reels-close').onclick=close;layer.querySelector('#reelo-reels-camera').onclick=()=>location.href='camera.html';
+ window.REeloOpenReels=open;
+}
+function style(){if(document.getElementById('reelo-reels-style'))return;const s=document.createElement('style');s.id='reelo-reels-style';s.textContent='.reelo-reels-layer{position:fixed;inset:0;background:#000;z-index:99999;display:none;color:#fff}.reelo-reels-layer.show{display:block}.reelo-reels-top{position:absolute;top:0;left:0;right:0;height:64px;z-index:5;display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:linear-gradient(#000b,transparent)}.reelo-reels-top button{border:0;background:#ffffff18;color:#fff;width:40px;height:40px;border-radius:50%;font-size:22px}.reelo-reels-top b{font-size:17px}.reelo-reel-item{position:absolute;inset:0;overflow:hidden}.reelo-reel-item video{width:100%;height:100%;object-fit:cover}.reelo-reel-gradient{position:absolute;inset:0;background:linear-gradient(transparent 45%,#000b 100%);pointer-events:none}.reelo-reel-meta{position:absolute;left:18px;right:90px;bottom:44px;display:flex;flex-direction:column;gap:6px}.reelo-reel-meta b{font-size:15px}.reelo-reel-meta span{font-size:12px;color:#ddd}.reelo-reel-actions{position:absolute;right:12px;bottom:32px;display:flex;flex-direction:column;gap:14px}.reelo-reel-actions button{border:0;background:transparent;color:#fff;font-size:25px;display:flex;flex-direction:column;align-items:center;gap:3px}.reelo-reel-actions small{font-size:9px;font-weight:700}.reelo-reel-item.liked{animation:reeloReelPop .35s ease}@keyframes reeloReelPop{50%{transform:scale(.985)}}.reelo-reels-hint{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:9px;color:#aaa;z-index:4;pointer-events:none}.reelo-reels-open{overflow:hidden}@media(min-width:700px){.reelo-reels-layer{left:50%;width:560px;transform:translateX(-50%);border-left:1px solid #222;border-right:1px solid #222}}';document.head.appendChild(s)}
+function boot(){style();init();const openButtons=document.querySelectorAll('[data-reelo-open-reels]');if(openButtons.length)return;const nav=document.querySelector('.bottom-nav');if(nav){const b=document.createElement('button');b.type='button';b.className='reelo-reels-nav';b.setAttribute('data-reelo-open-reels','1');b.textContent='Reels';nav.appendChild(b)}}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',boot);else boot();
+})();
