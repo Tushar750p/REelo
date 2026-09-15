@@ -8,7 +8,7 @@ import hashlib, hmac, os, secrets, sqlite3
 from database_gateway import db
 from automated_moderation import moderate_text
 from saved_routes import router as saved_router
-from storage import upload_video
+from storage import upload_video as persist_video
 
 ROOT=Path(__file__).parent
 MEDIA=ROOT/"media"
@@ -135,7 +135,7 @@ async def upload_video(file:UploadFile=File(...),caption:str=Form(""),authorizat
     vid=uuid4().hex
     storage_url=None
     try:
-        storage_url=upload_video(dest,vid)
+        storage_url=persist_video(dest,vid)
     except Exception as exc:
         dest.unlink(missing_ok=True)
         raise HTTPException(502,f"Persistent video storage upload failed: {exc}")
