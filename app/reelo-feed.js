@@ -1,4 +1,4 @@
-/* REelo Feed Interactions v2 */
+/* REelo Feed Interactions v3 */
 (function(){
   'use strict';
 
@@ -92,11 +92,46 @@
     sync();
   }
 
+  function injectStories(){
+    if(document.getElementById('reelo-home-stories')) return;
+    const shell=document.querySelector('.shell');
+    const feed=document.getElementById('feed');
+    if(!shell||!feed) return;
+    const stories=document.createElement('section');
+    stories.id='reelo-home-stories';
+    stories.className='reelo-home-stories';
+    stories.setAttribute('aria-label','Stories');
+    stories.innerHTML='<div class="reelo-stories-head"><b>Stories</b><a href="stories.html">See all</a></div>'
+      +'<div class="reelo-stories-row">'
+      +'<button class="reelo-story your-story" type="button" onclick="location.href=\'stories.html\'">'
+      +'<span class="reelo-story-ring"><span class="reelo-story-avatar reelo-add">＋</span></span><small>Your story</small></button>'
+      +'<button class="reelo-story" type="button" onclick="location.href=\'stories.html\'">'
+      +'<span class="reelo-story-ring"><span class="reelo-story-avatar">R</span></span><small>REelo</small></button>'
+      +'<button class="reelo-story" type="button" onclick="location.href=\'stories.html\'">'
+      +'<span class="reelo-story-ring"><span class="reelo-story-avatar">F</span></span><small>Future</small></button>'
+      +'<button class="reelo-story" type="button" onclick="location.href=\'stories.html\'">'
+      +'<span class="reelo-story-ring"><span class="reelo-story-avatar">C</span></span><small>Creator</small></button>'
+      +'<button class="reelo-story" type="button" onclick="location.href=\'stories.html\'">'
+      +'<span class="reelo-story-ring"><span class="reelo-story-avatar">A</span></span><small>Artist</small></button>'
+      +'</div>';
+    shell.insertBefore(stories,feed);
+  }
+
   function injectStyle(){
     if(document.getElementById('reelo-interactions-style')) return;
     const style=document.createElement('style');
     style.id='reelo-interactions-style';
     style.textContent=''
+      +'.reelo-home-stories{position:absolute;top:62px;left:0;right:0;z-index:6;padding:8px 14px 10px;background:linear-gradient(180deg,rgba(0,0,0,.72),rgba(0,0,0,.35),transparent);pointer-events:auto} '
+      +'.reelo-stories-head{display:flex;align-items:center;justify-content:space-between;padding:0 4px 7px;font-size:13px} '
+      +'.reelo-stories-head b{font-size:14px}.reelo-stories-head a{color:#ddd;text-decoration:none;font-weight:700;font-size:12px} '
+      +'.reelo-stories-row{display:flex;gap:12px;overflow-x:auto;scrollbar-width:none;padding:1px 2px 3px}.reelo-stories-row::-webkit-scrollbar{display:none} '
+      +'.reelo-story{border:0;background:none;color:#fff;min-width:58px;padding:0;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer} '
+      +'.reelo-story small{font-size:10px;max-width:58px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} '
+      +'.reelo-story-ring{width:48px;height:48px;border-radius:50%;padding:2px;background:linear-gradient(135deg,#fff,#777,#222);display:grid;place-items:center} '
+      +'.reelo-story-avatar{width:100%;height:100%;border-radius:50%;background:#171717;border:2px solid #000;display:grid;place-items:center;font-weight:900;font-size:17px} '
+      +'.reelo-story .reelo-add{background:#fff;color:#000;font-size:25px} '
+      +'.reelo-story.your-story .reelo-story-ring{background:#555} '
       +'.reelo-video-controls{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;pointer-events:none} '
       +'.reelo-play{width:56px;height:56px;border:1px solid rgba(255,255,255,.24);border-radius:50%;background:rgba(0,0,0,.42);backdrop-filter:blur(12px);color:#fff;font-size:21px;display:grid;place-items:center;cursor:pointer;pointer-events:auto;box-shadow:0 8px 28px rgba(0,0,0,.3)} '
       +'.reelo-play:active,.reelo-sound:active{transform:scale(.9)} '
@@ -115,6 +150,7 @@
   function scan(){document.querySelectorAll('.video-card').forEach(enhanceCard);}
   function init(){
     injectStyle();
+    injectStories();
     scan();
     new MutationObserver(scan).observe(document.body,{childList:true,subtree:true});
     document.addEventListener('keydown',function(e){
