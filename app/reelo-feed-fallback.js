@@ -1,4 +1,4 @@
-/* REelo Feed Fallback v2 - persistent media aware */
+/* REelo Feed Fallback v3 - persistent media + visible login */
 (function(){
   'use strict';
   const API=window.REELO_API||'https://reelo-api-ko9x.onrender.com';
@@ -8,6 +8,25 @@
   ];
   const esc=s=>String(s??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
   const mediaUrl=v=>{const u=v.storage_url||v.url||v.filename||'';return /^https?:\/\//i.test(u)?u:(u.startsWith('/media/')?API+u:API+'/media/'+u.replace(/^\//,''));};
+
+  function ensureLoginButton(){
+    if(localStorage.getItem('reelo_token')) return;
+    if(document.getElementById('reelo-login-btn')) return;
+    const header=document.querySelector('.header');
+    if(!header) return;
+    const btn=document.createElement('button');
+    btn.id='reelo-login-btn';
+    btn.type='button';
+    btn.textContent='Log in';
+    btn.style.cssText='border:1px solid #444;background:#fff;color:#000;border-radius:10px;padding:8px 13px;font-weight:800;font-size:12px;cursor:pointer;position:absolute;right:62px;top:calc(10px + env(safe-area-inset-top));z-index:20;';
+    btn.onclick=function(){
+      if(typeof window.openAuth==='function'){window.openAuth('login');return;}
+      const a=document.getElementById('auth');
+      if(a){a.classList.add('show');a.style.display='flex';}
+    };
+    header.appendChild(btn);
+  }
+
   function render(items){
     const feed=document.getElementById('feed'); if(!feed||feed.querySelector('.video-card')) return;
     feed.innerHTML=items.map(v=>`<article class="video-card" data-video-id="${esc(v.id)}">
@@ -29,8 +48,10 @@
     });
     if(window.REeloEnhanceFeed) window.REeloEnhanceFeed();
   }
+
   async function load(){
     const feed=document.getElementById('feed'); if(!feed) return;
+    ensureLoginButton();
     if(feed.querySelector('.video-card')) return;
     let items=[];
     try{
@@ -39,6 +60,15 @@
     }catch(e){}
     if(items.length) render(items); else render(demos);
   }
-  window.addEventListener('load',()=>setTimeout(load,700));
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden) setTimeout(load,250);});
+
+  function init(){
+    ensureLoginButton();
+    setTimeout(load,250);
+    setTimeout(ensureLoginButton,1000);
+    setTimeout(ensureLoginButton,2500);
+  }
+
+  window.addEventListener('load',init);
+  if(document.readyState!=='loading') init();
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden){ensureLoginButton();setTimeout(load,250);}});
 })();
